@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "seed:e2e": "tsx src/scripts/seed-e2e.ts"
   },
   "keywords": [],
   "author": "",
@@ -30,6 +31,7 @@
     "express": "^5.2.1",
     "jose": "^6.2.12",
     "pg": "^8.23.0",
+    "yjs": "^13.6.32",
     "zod": "^4.5.4"
   },
   "devDependencies": {

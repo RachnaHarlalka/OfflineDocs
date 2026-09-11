@@ -15,7 +15,28 @@ export default defineConfig({
     trace: "on-first-retry",
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // Mints one storage state per role. Everything else depends on it.
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+
+    {
+      name: "owner",
+      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/owner.json" },
+      dependencies: ["setup"],
+    },
+    {
+      name: "editor",
+      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/editor.json" },
+      dependencies: ["setup"],
+    },
+    {
+      name: "viewer",
+      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/viewer.json" },
+      dependencies: ["setup"],
+    },
+    // Signed out on purpose — this is where authorisation holes show up.
+    { name: "anon", use: { ...devices["Desktop Chrome"] } },
+  ],
 
   webServer: [
     {
