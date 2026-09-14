@@ -1,4 +1,5 @@
 export type CollaboratorRole = "owner" | "editor" | "viewer";
+export type AssignableCollaboratorRole = Exclude<CollaboratorRole, "owner">;
 
 export interface AuthUser {
   id: string;
@@ -46,6 +47,23 @@ export interface DocDetail extends Doc {
   role: CollaboratorRole;
 }
 
+export interface DocCollaboratorDto {
+  userId: string;
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+  role: CollaboratorRole;
+}
+
+export interface InviteCollaboratorRequest {
+  email: string;
+  role: AssignableCollaboratorRole;
+}
+
+export interface ChangeRoleRequest {
+  role: AssignableCollaboratorRole;
+}
+
 export interface CreateDocRequest {
   title?: string;
 }
@@ -64,6 +82,14 @@ export interface DocResponse {
 
 export interface DocDetailResponse {
   doc: DocDetail;
+}
+
+export interface CollaboratorsResponse {
+  collaborators: DocCollaboratorDto[];
+}
+
+export interface CollaboratorResponse {
+  collaborator: DocCollaboratorDto;
 }
 
 export interface SaveRequest {

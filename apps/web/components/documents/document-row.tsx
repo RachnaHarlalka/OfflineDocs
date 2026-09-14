@@ -10,30 +10,39 @@ import { docErrorMessage, FALLBACK_DOC_ERROR } from "@/constants/errors";
 import { DOCUMENT_ROW_LABELS } from "@/constants/labels";
 import { ROUTES } from "@/constants/routes";
 import { ApiError } from "@/lib/api/client";
+import { useRemoveCollaborator } from "@/lib/documents/use-collaborators";
 import { relativeTime } from "@/lib/documents/relative-time";
-import { useDeleteDoc, useDuplicateDoc, useRenameDoc } from "@/lib/documents/use-documents";
+import {
+  useDeleteDoc,
+  useDuplicateDoc,
+  useRenameDoc,
+} from "@/lib/documents/use-documents";
+
+const TITLE_MAX_LENGTH = 200;
 
 function memberCountLabel(count: number): string {
   return count === 1 ? "1 member" : `${count} members`;
 }
 
-// Row-level mutations (rename/duplicate) have no dedicated error UI of their
-// own, unlike delete's confirm dialog — this turns whatever they threw into
-// the same user-facing copy the list-level fetch error already uses.
 function mutationErrorMessage(error: unknown): string | null {
   if (!error) return null;
-  if (error instanceof ApiError) return docErrorMessage(error.code) ?? FALLBACK_DOC_ERROR;
+  if (error instanceof ApiError)
+    return docErrorMessage(error.code) ?? FALLBACK_DOC_ERROR;
   return FALLBACK_DOC_ERROR;
 }
 
 export function DocumentRow({
   doc,
+  currentUserId,
   isDirty,
   onOpenDetails,
+  onShare,
 }: {
   doc: DocSummary;
+  currentUserId: string | undefined;
   isDirty: boolean;
   onOpenDetails: (id: string) => void;
+  onShare: (id: string) => void;
 }) {
   const {
     renamePlaceholder,
@@ -42,21 +51,34 @@ export function DocumentRow({
     delete: deleteLabel,
     confirmDelete,
     cancel,
+    leave,
+    leaving,
+    confirmLeave,
+    leaveDescription,
   } = DOCUMENT_ROW_LABELS;
 
   const router = useRouter();
   const renameDoc = useRenameDoc();
   const deleteDoc = useDeleteDoc();
   const duplicateDoc = useDuplicateDoc();
+  const leaveDoc = useRemoveCollaborator(doc.id);
 
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(doc.title);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
 
-  const busy = renameDoc.isPending || deleteDoc.isPending || duplicateDoc.isPending;
-  const rowError = mutationErrorMessage(renameDoc.error) ?? mutationErrorMessage(duplicateDoc.error);
+  const busy =
+    renameDoc.isPending ||
+    deleteDoc.isPending ||
+    duplicateDoc.isPending ||
+    leaveDoc.isPending;
+  const rowError =
+    mutationErrorMessage(renameDoc.error) ??
+    mutationErrorMessage(duplicateDoc.error);
 
   function startRename() {
+    renameDoc.reset();
     setTitle(doc.title);
     setEditing(true);
   }
@@ -68,10 +90,14 @@ export function DocumentRow({
       setEditing(false);
       return;
     }
-    renameDoc.mutate({ id: doc.id, title: trimmed }, { onSuccess: () => setEditing(false) });
+    renameDoc.mutate(
+      { id: doc.id, title: trimmed },
+      { onSuccess: () => setEditing(false) },
+    );
   }
 
   function cancelRename() {
+    renameDoc.reset();
     setTitle(doc.title);
     setEditing(false);
   }
@@ -98,6 +124,7 @@ export function DocumentRow({
               autoFocus
               value={title}
               placeholder={renamePlaceholder}
+              maxLength={TITLE_MAX_LENGTH}
               disabled={renameDoc.isPending}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={commitRename}
@@ -145,7 +172,9 @@ export function DocumentRow({
               busy={busy}
               onOpenDetails={() => onOpenDetails(doc.id)}
               onRename={startRename}
+              onShare={() => onShare(doc.id)}
               onDuplicate={() => duplicateDoc.mutate(doc.id)}
+              onLeave={() => setConfirmingLeave(true)}
               onDelete={() => setConfirmingDelete(true)}
             />
           )}
@@ -168,7 +197,29 @@ export function DocumentRow({
         confirmLabel={deleteLabel}
         confirmingLabel={deleting}
         isConfirming={deleteDoc.isPending}
-        onConfirm={() => deleteDoc.mutate(doc.id, { onSuccess: () => setConfirmingDelete(false) })}
+        onConfirm={() =>
+          deleteDoc.mutate(doc.id, {
+            onSuccess: () => setConfirmingDelete(false),
+          })
+        }
+      />
+
+      <ConfirmDialog
+        open={confirmingLeave}
+        onOpenChange={setConfirmingLeave}
+        title={confirmLeave}
+        description={leaveDescription}
+        error={mutationErrorMessage(leaveDoc.error)}
+        cancelLabel={cancel}
+        confirmLabel={leave}
+        confirmingLabel={leaving}
+        isConfirming={leaveDoc.isPending}
+        onConfirm={() => {
+          if (!currentUserId) return;
+          leaveDoc.mutate(currentUserId, {
+            onSuccess: () => setConfirmingLeave(false),
+          });
+        }}
       />
     </>
   );

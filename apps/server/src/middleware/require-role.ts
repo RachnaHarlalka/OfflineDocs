@@ -19,7 +19,11 @@ declare global {
 }
 
 // Runtime value, so it can't live in packages/shared (type-only constraint from CP-B1).
-const ROLE_RANK: Record<CollaboratorRole, number> = { viewer: 1, editor: 2, owner: 3 };
+const ROLE_RANK: Record<CollaboratorRole, number> = {
+  viewer: 1,
+  editor: 2,
+  owner: 3,
+};
 
 /**
  * No row for the caller on this doc -> notFound, not forbidden. A 403 would let a
@@ -28,7 +32,11 @@ const ROLE_RANK: Record<CollaboratorRole, number> = { viewer: 1, editor: 2, owne
  * the doc exists, so nothing new leaks there.
  */
 export function requireRole(minimum: CollaboratorRole) {
-  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  return async (
+    req: Request,
+    _res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const docId = req.params.id as string;
       const userId = req.user?.id;

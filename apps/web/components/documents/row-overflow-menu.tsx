@@ -1,4 +1,12 @@
-import { Copy, Info, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import {
+  Copy,
+  DoorOpen,
+  Info,
+  MoreVertical,
+  Pencil,
+  Share2,
+  Trash2,
+} from "lucide-react";
 import type { CollaboratorRole } from "@docsync/shared";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,28 +18,31 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DOCUMENT_ROW_LABELS } from "@/constants/labels";
 
-// Share/leave are omitted, not disabled, per D9 — those endpoints don't
-// exist until Part 3. Extend this table then, don't pre-build for it now.
-type RowAction = "rename" | "duplicate" | "delete";
+// Owner: rename/share/duplicate/delete. Non-owner: duplicate/leave.
+type RowAction = "rename" | "share" | "duplicate" | "leave" | "delete";
 
 const ACTIONS_BY_ROLE: Record<CollaboratorRole, readonly RowAction[]> = {
-  owner: ["rename", "duplicate", "delete"],
-  editor: ["duplicate"],
-  viewer: ["duplicate"],
+  owner: ["rename", "share", "duplicate", "delete"],
+  editor: ["duplicate", "leave"],
+  viewer: ["duplicate", "leave"],
 };
 
 export function RowOverflowMenu({
   role,
   onOpenDetails,
   onRename,
+  onShare,
   onDuplicate,
+  onLeave,
   onDelete,
   busy,
 }: {
   role: CollaboratorRole;
   onOpenDetails: () => void;
   onRename?: () => void;
+  onShare?: () => void;
   onDuplicate?: () => void;
+  onLeave?: () => void;
   onDelete?: () => void;
   busy?: boolean;
 }) {
@@ -40,7 +51,9 @@ export function RowOverflowMenu({
     rowActions,
     viewDetails,
     rename,
+    share,
     duplicate,
+    leave,
     delete: deleteLabel,
   } = DOCUMENT_ROW_LABELS;
 
@@ -58,7 +71,8 @@ export function RowOverflowMenu({
       >
         <MoreVertical />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+
+      <DropdownMenuContent align="end" finalFocus={false}>
         <DropdownMenuItem onClick={onOpenDetails}>
           <Info />
           {viewDetails}
@@ -68,6 +82,13 @@ export function RowOverflowMenu({
           <DropdownMenuItem onClick={onRename}>
             <Pencil />
             {rename}
+          </DropdownMenuItem>
+        ) : null}
+
+        {allowed.includes("share") && onShare ? (
+          <DropdownMenuItem onClick={onShare}>
+            <Share2 />
+            {share}
           </DropdownMenuItem>
         ) : null}
 
@@ -84,6 +105,16 @@ export function RowOverflowMenu({
             <DropdownMenuItem variant="destructive" onClick={onDelete}>
               <Trash2 />
               {deleteLabel}
+            </DropdownMenuItem>
+          </>
+        ) : null}
+
+        {allowed.includes("leave") && onLeave ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={onLeave}>
+              <DoorOpen />
+              {leave}
             </DropdownMenuItem>
           </>
         ) : null}

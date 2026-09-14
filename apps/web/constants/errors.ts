@@ -1,13 +1,14 @@
-
 export const AUTH_ERROR_MESSAGES: Record<string, string> = {
   access_denied: "You cancelled the Google sign-in. Nothing was changed.",
   provider_error: "Google rejected the sign-in request. Please try again.",
   invalid_oauth_state:
     "That sign-in attempt expired or could not be verified. Please start again.",
-  provider_not_configured: "Google sign-in is not configured on this server yet.",
+  provider_not_configured:
+    "Google sign-in is not configured on this server yet.",
   oauth_exchange_failed:
     "We could not finish the exchange with Google. Please try again.",
-  oauth_profile_failed: "We could not read your Google profile. Please try again.",
+  oauth_profile_failed:
+    "We could not read your Google profile. Please try again.",
   email_not_verified:
     "Your Google email address is not verified. Verify it with Google, then sign in again.",
   email_already_registered:
@@ -39,12 +40,13 @@ export const DOC_ERROR_MESSAGES: Record<string, string> = {
   not_found: "This document is no longer available. Try refreshing the list.",
   forbidden: "You do not have access to do that.",
   bad_request: "That title isn't valid. Please enter a non-empty title.",
+  invite_user_not_found: "No DocSync account uses that email address.",
+  already_collaborator: "This person already has access to this document.",
+  last_owner: "This document needs at least one owner.",
 };
 
 export const FALLBACK_DOC_ERROR = "Something went wrong. Please try again.";
 
-// Takes the code, not the ApiError itself — ApiError lives in lib/api/client.ts,
-// which already imports from this file, so importing it back here would cycle.
 export function docErrorMessage(code: string | undefined): string | null {
   if (!code) return null;
   return DOC_ERROR_MESSAGES[code] ?? FALLBACK_DOC_ERROR;

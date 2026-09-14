@@ -112,8 +112,13 @@ export const DOCUMENT_ROW_LABELS = {
   viewDetails: "Details",
   rename: "Rename",
   renamePlaceholder: "Document title",
+  share: "Share",
   duplicate: "Duplicate",
   duplicating: "Duplicating…",
+  leave: "Leave",
+  leaving: "Leaving…",
+  confirmLeave: "Leave this document?",
+  leaveDescription: "You'll lose access to this document. You can be re-invited later.",
   delete: "Delete",
   deleting: "Deleting…",
   confirmDelete: "Delete this document?",
@@ -135,7 +140,25 @@ export const DOC_DRAWER_LABELS = {
   updated: "Last modified",
   open: "Open",
   manageAccess: "Manage access",
-  manageAccessComingSoon: "Sharing isn't built yet — coming in a later phase.",
+} as const;
+
+export const SHARE_PANEL_LABELS = {
+  title: "Share document",
+  invitePeople: "Invite people",
+  emailPlaceholder: "name@company.com",
+  sendInvite: "Send invite",
+  sendInviteShort: "Invite",
+  sending: "Sending…",
+  done: "Done",
+  roleHint: "Editors can write and save. Viewers can only read.",
+  peopleWithAccess: "People with access",
+  you: "(you)",
+  removeAccess: "Remove access",
+  confirmRemoveTitle: "Remove access?",
+  removeDescriptionSuffix: "will lose access to this document. This can't be undone.",
+  removing: "Removing…",
+  cancel: "Cancel",
+  inviteErrorFallback: "Something went wrong sending that invite.",
 } as const;
 
 export const EDITOR_LABELS = {
