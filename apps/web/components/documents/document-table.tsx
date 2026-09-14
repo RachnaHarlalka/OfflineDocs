@@ -11,6 +11,7 @@ import { docErrorMessage } from "@/constants/errors";
 import { NETWORK_ERROR_MESSAGE } from "@/constants/errors";
 import { DOCUMENTS_PAGE_LABELS } from "@/constants/labels";
 import { ApiError } from "@/lib/api/client";
+import { useDirtyDocIds } from "@/lib/documents/use-dirty-doc-ids";
 import { useDocs } from "@/lib/documents/use-documents";
 
 export function DocumentTable() {
@@ -25,6 +26,7 @@ export function DocumentTable() {
 
   const { data, isPending, isError, error, refetch } = useDocs();
   const [detailsDocId, setDetailsDocId] = useState<string | null>(null);
+  const dirtyDocIds = useDirtyDocIds();
 
   if (isPending) {
     return (
@@ -91,12 +93,18 @@ export function DocumentTable() {
       </div>
       <ul aria-busy="false" className="divide-y divide-border">
         {data.map((doc) => (
-          <DocumentRow key={doc.id} doc={doc} onOpenDetails={setDetailsDocId} />
+          <DocumentRow
+            key={doc.id}
+            doc={doc}
+            isDirty={dirtyDocIds.has(doc.id)}
+            onOpenDetails={setDetailsDocId}
+          />
         ))}
       </ul>
 
       <DocumentDetailsDrawer
         docId={detailsDocId}
+        isDirty={detailsDocId !== null && dirtyDocIds.has(detailsDocId)}
         onClose={() => setDetailsDocId(null)}
       />
     </div>
