@@ -14,11 +14,13 @@ import { useDocs } from "@/lib/documents/use-documents";
 export function DocumentDetailsDrawer({
   docId,
   currentUserId,
+  isDirty,
   onClose,
   onManageAccess,
 }: {
   docId: string | null;
   currentUserId: string | undefined;
+  isDirty: boolean;
   onClose: () => void;
   onManageAccess: (docId: string) => void;
 }) {
@@ -93,7 +95,7 @@ export function DocumentDetailsDrawer({
           </div>
           <div className="flex items-center justify-between border-b border-border py-2">
             <span className="text-caption text-muted-foreground">{status}</span>
-            <SyncBadge state="saved" />
+            <SyncBadge state={isDirty ? "draft" : "saved"} />
           </div>
           <div className="flex items-center justify-between py-2">
             <span className="text-caption text-muted-foreground">

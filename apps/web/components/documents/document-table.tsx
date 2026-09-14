@@ -13,6 +13,7 @@ import { NETWORK_ERROR_MESSAGE } from "@/constants/errors";
 import { DOCUMENTS_PAGE_LABELS } from "@/constants/labels";
 import { ApiError } from "@/lib/api/client";
 import { useSession } from "@/lib/auth/use-session";
+import { useDirtyDocIds } from "@/lib/documents/use-dirty-doc-ids";
 import { useDocs } from "@/lib/documents/use-documents";
 
 export function DocumentTable() {
@@ -30,6 +31,7 @@ export function DocumentTable() {
   const { data: session } = useSession();
   const [detailsDocId, setDetailsDocId] = useState<string | null>(null);
   const [shareDocId, setShareDocId] = useState<string | null>(null);
+  const dirtyDocIds = useDirtyDocIds();
 
   if (isPending) {
     return (
@@ -97,11 +99,16 @@ export function DocumentTable() {
       <ul aria-busy="false" className="divide-y divide-border">
         {data.map((doc) => (
           <DocumentRow
+
             key={doc.id}
+
             doc={doc}
             currentUserId={session?.id}
+
+            isDirty={dirtyDocIds.has(doc.id)}
             onOpenDetails={setDetailsDocId}
             onShare={setShareDocId}
+
           />
         ))}
       </ul>
@@ -109,6 +116,7 @@ export function DocumentTable() {
       <DocumentDetailsDrawer
         docId={detailsDocId}
         currentUserId={session?.id}
+        isDirty={detailsDocId !== null && dirtyDocIds.has(detailsDocId)}
         onClose={() => setDetailsDocId(null)}
         onManageAccess={setShareDocId}
       />

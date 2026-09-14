@@ -8,6 +8,7 @@ import type {
   DocSummary,
   DocsResponse,
   RenameDocRequest,
+  SaveRequest,
 } from "@docsync/shared";
 import { AppError } from "../lib/http-error.js";
 import { getAuthenticatedUser } from "../middleware/auth.js";
@@ -19,6 +20,7 @@ import {
   getDocById,
   listDocsForUser,
   renameDoc,
+  saveDoc,
   type DocDetailRecord,
   type DocSummaryRecord,
 } from "../services/docs.js";
@@ -96,6 +98,13 @@ export async function remove(req: Request, res: Response): Promise<void> {
   const { docId } = getDocAccess(req);
   await deleteDoc(docId);
   res.status(204).send();
+}
+
+export async function save(req: Request, res: Response<DocResponse>): Promise<void> {
+  const { docId, role } = getDocAccess(req);
+  const { update } = req.body as unknown as SaveRequest;
+  const doc = await saveDoc(docId, update);
+  res.json({ doc: toDocSummary(doc, role) });
 }
 
 export async function duplicate(req: Request, res: Response<DocResponse>): Promise<void> {

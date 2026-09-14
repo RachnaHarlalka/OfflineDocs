@@ -34,11 +34,13 @@ function mutationErrorMessage(error: unknown): string | null {
 export function DocumentRow({
   doc,
   currentUserId,
+  isDirty,
   onOpenDetails,
   onShare,
 }: {
   doc: DocSummary;
   currentUserId: string | undefined;
+  isDirty: boolean;
   onOpenDetails: (id: string) => void;
   onShare: (id: string) => void;
 }) {
@@ -160,7 +162,7 @@ export function DocumentRow({
         </div>
 
         <div className="hidden w-24 shrink-0 md:block">
-          <SyncBadge state="saved" />
+          <SyncBadge state={isDirty ? "draft" : "saved"} />
         </div>
 
         <div className="w-8 shrink-0">

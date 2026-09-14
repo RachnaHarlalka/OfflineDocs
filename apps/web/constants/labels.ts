@@ -161,10 +161,16 @@ export const SHARE_PANEL_LABELS = {
   inviteErrorFallback: "Something went wrong sending that invite.",
 } as const;
 
-export const DOC_PAGE_LABELS = {
-  placeholderTitle: "Document",
-  placeholderBody:
-    "The editor for this document isn't built yet — this route exists so navigation has somewhere to land.",
+export const EDITOR_LABELS = {
+  titlePlaceholder: "Untitled document",
+  bodyPlaceholder: "Start writing…",
+  save: "Save",
+  saving: "Saving…",
+  saveFailed: "Couldn't save. Try again.",
+  retry: "Retry",
+  viewOnly: "View only",
+  offlineHint: "You're offline — reconnect to save.",
+  loadErrorTitle: "Couldn't load this document",
 } as const;
 
 export const SYNC_STATE_LABELS = {
