@@ -28,9 +28,11 @@ const PANEL_CLASSNAME =
 
 export function DocumentDetailsDrawer({
   docId,
+  isDirty,
   onClose,
 }: {
   docId: string | null;
+  isDirty: boolean;
   onClose: () => void;
 }) {
   const {
@@ -81,9 +83,7 @@ export function DocumentDetailsDrawer({
                   <span className="text-caption text-muted-foreground">
                     {status}
                   </span>
-                  {/* Always "saved" for now, same simplification as the row —
-                      nothing edits locally until Part 2 exists. */}
-                  <SyncBadge state="saved" />
+                  <SyncBadge state={isDirty ? "draft" : "saved"} />
                 </div>
                 <div className="flex items-center justify-between py-2">
                   <span className="text-caption text-muted-foreground">

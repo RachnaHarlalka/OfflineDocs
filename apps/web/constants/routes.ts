@@ -19,4 +19,5 @@ export const API = {
   docs: "/docs",
   doc: (id: string) => `/docs/${id}`,
   docDuplicate: (id: string) => `/docs/${id}/duplicate`,
+  docSave: (id: string) => `/docs/${id}/save`,
 } as const;

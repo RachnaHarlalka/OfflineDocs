@@ -28,9 +28,11 @@ function mutationErrorMessage(error: unknown): string | null {
 
 export function DocumentRow({
   doc,
+  isDirty,
   onOpenDetails,
 }: {
   doc: DocSummary;
+  isDirty: boolean;
   onOpenDetails: (id: string) => void;
 }) {
   const {
@@ -132,11 +134,8 @@ export function DocumentRow({
           </span>
         </div>
 
-        {/* Always "saved" for now — nothing edits locally until Part 2 exists,
-            so every doc fetched fresh from the server genuinely has no
-            unsynced changes. Phase 2 replaces this with real local state. */}
         <div className="hidden w-24 shrink-0 md:block">
-          <SyncBadge state="saved" />
+          <SyncBadge state={isDirty ? "draft" : "saved"} />
         </div>
 
         <div className="w-8 shrink-0">

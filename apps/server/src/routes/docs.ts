@@ -3,7 +3,7 @@ import * as docsController from "../controllers/docs.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireRole } from "../middleware/require-role.js";
 import { validate } from "../middleware/validate.js";
-import { createDocSchema, renameDocSchema } from "../validators/docs.js";
+import { createDocSchema, renameDocSchema, saveDocSchema } from "../validators/docs.js";
 
 export const docsRouter = Router();
 
@@ -20,3 +20,9 @@ docsRouter.patch(
 );
 docsRouter.delete("/:id", requireRole("owner"), docsController.remove);
 docsRouter.post("/:id/duplicate", requireRole("viewer"), docsController.duplicate);
+docsRouter.post(
+  "/:id/save",
+  requireRole("editor"),
+  validate("body", saveDocSchema),
+  docsController.save,
+);

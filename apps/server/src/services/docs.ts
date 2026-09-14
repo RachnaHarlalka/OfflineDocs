@@ -1,3 +1,4 @@
+import * as Y from "yjs";
 import { prisma } from "../db/client.js";
 import { AppError } from "../lib/http-error.js";
 import type { CollaboratorRole } from "@docsync/shared";
@@ -101,6 +102,33 @@ export async function renameDoc(docId: string, title: string): Promise<DocSummar
 
 export async function deleteDoc(docId: string): Promise<void> {
   await prisma.doc.delete({ where: { id: docId } });
+}
+
+// Merges an incoming Yjs update (base64, from encodeUpdate() client-side) into the
+// doc's stored snapshot. Y.applyUpdate() is what actually validates the payload is a
+// real Yjs update — the request-body validator only checks it's a non-empty string.
+export async function saveDoc(docId: string, update: string): Promise<DocSummaryRecord> {
+  const existing = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: { snapshot: true },
+  });
+  if (!existing) throw AppError.notFound("Document not found");
+
+  const ydoc = new Y.Doc();
+  if (existing.snapshot) Y.applyUpdate(ydoc, existing.snapshot);
+
+  try {
+    Y.applyUpdate(ydoc, Buffer.from(update, "base64"));
+  } catch {
+    throw AppError.badRequest("Invalid document update");
+  }
+
+  const snapshot = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+  return prisma.doc.update({
+    where: { id: docId },
+    data: { snapshot },
+    select: DOC_SUMMARY_FIELDS,
+  });
 }
 
 
