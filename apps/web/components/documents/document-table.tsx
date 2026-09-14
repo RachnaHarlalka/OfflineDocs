@@ -7,10 +7,12 @@ import { DocumentRow } from "@/components/documents/document-row";
 import { DocumentRowSkeleton } from "@/components/documents/document-row-skeleton";
 import { EmptyState } from "@/components/documents/empty-state";
 import { NewDocumentButton } from "@/components/documents/new-document-button";
+import { SharePanel } from "@/components/documents/share-panel";
 import { docErrorMessage } from "@/constants/errors";
 import { NETWORK_ERROR_MESSAGE } from "@/constants/errors";
 import { DOCUMENTS_PAGE_LABELS } from "@/constants/labels";
 import { ApiError } from "@/lib/api/client";
+import { useSession } from "@/lib/auth/use-session";
 import { useDocs } from "@/lib/documents/use-documents";
 
 export function DocumentTable() {
@@ -24,7 +26,10 @@ export function DocumentTable() {
   } = DOCUMENTS_PAGE_LABELS;
 
   const { data, isPending, isError, error, refetch } = useDocs();
+
+  const { data: session } = useSession();
   const [detailsDocId, setDetailsDocId] = useState<string | null>(null);
+  const [shareDocId, setShareDocId] = useState<string | null>(null);
 
   if (isPending) {
     return (
@@ -91,13 +96,27 @@ export function DocumentTable() {
       </div>
       <ul aria-busy="false" className="divide-y divide-border">
         {data.map((doc) => (
-          <DocumentRow key={doc.id} doc={doc} onOpenDetails={setDetailsDocId} />
+          <DocumentRow
+            key={doc.id}
+            doc={doc}
+            currentUserId={session?.id}
+            onOpenDetails={setDetailsDocId}
+            onShare={setShareDocId}
+          />
         ))}
       </ul>
 
       <DocumentDetailsDrawer
         docId={detailsDocId}
+        currentUserId={session?.id}
         onClose={() => setDetailsDocId(null)}
+        onManageAccess={setShareDocId}
+      />
+
+      <SharePanel
+        docId={shareDocId}
+        currentUserId={session?.id}
+        onClose={() => setShareDocId(null)}
       />
     </div>
   );
