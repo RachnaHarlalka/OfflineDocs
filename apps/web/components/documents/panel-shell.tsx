@@ -6,15 +6,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-// The shared doc-scoped panel: bottom sheet under md, 420px right-hand side
-// panel from md up. One definition so Details and Share can never drift apart.
-//
-// Written mobile-first and fully explicit rather than as max-md: overrides on
-// top of DialogContent's centered-dialog base. Those base utilities are
-// unprefixed, so a variant-prefixed override lands in a different
-// tailwind-merge group and both survive — which is why the sheet never
-// anchored to the bottom. Every property the base sets is restated here,
-// including sm:max-w-none to cancel the base's sm:max-w-sm on tablets.
+
 export const PANEL_CLASSNAME = [
   "fixed inset-x-0 top-auto bottom-0 z-50 flex h-auto max-h-[85dvh] w-full",
   "max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden",
