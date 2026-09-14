@@ -16,19 +16,23 @@ export class AppError extends Error {
     this.details = details;
   }
 
-  static badRequest(message: string, details?: unknown) {
-    return new AppError(400, "bad_request", message, details);
+  static badRequest(message: string, details?: unknown, code = "bad_request") {
+    return new AppError(400, code, message, details);
   }
 
-  static unauthorized(message = "Authentication required") {
-    return new AppError(401, "unauthorized", message);
+  static unauthorized(message = "Authentication required", code = "unauthorized") {
+    return new AppError(401, code, message);
   }
 
-  static forbidden(message = "You do not have access to this resource") {
-    return new AppError(403, "forbidden", message);
+  static forbidden(message = "You do not have access to this resource", code = "forbidden") {
+    return new AppError(403, code, message);
   }
 
-  static notFound(message = "Resource not found") {
-    return new AppError(404, "not_found", message);
+  static notFound(message = "Resource not found", code = "not_found") {
+    return new AppError(404, code, message);
+  }
+
+  static conflict(message = "This conflicts with existing data", code = "conflict", details?: unknown) {
+    return new AppError(409, code, message, details);
   }
 }

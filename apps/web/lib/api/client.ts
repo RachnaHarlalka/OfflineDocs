@@ -115,12 +115,37 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
   return response;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await apiFetch(path);
+// 204 / empty bodies have nothing for response.json() to parse — it would throw.
+async function parseJson<T>(response: Response): Promise<T> {
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 
-/** For endpoints that answer `204 No Content`. */
-export async function apiPost(path: string): Promise<void> {
-  await apiFetch(path, { method: "POST" });
+function jsonBody(body: unknown): { headers: HeadersInit; body: string } | Record<string, never> {
+  if (body === undefined) return {};
+  // Stringify eagerly: apiFetch may replay the same options on a refreshed 401,
+  // so the body must be a re-sendable string, not something consumed once.
+  return { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const response = await apiFetch(path);
+  return parseJson<T>(response);
+}
+
+export async function apiPost<T = void>(path: string, body?: unknown): Promise<T> {
+  const response = await apiFetch(path, { method: "POST", ...jsonBody(body) });
+  return parseJson<T>(response);
+}
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const response = await apiFetch(path, { method: "PATCH", ...jsonBody(body) });
+  return parseJson<T>(response);
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  const response = await apiFetch(path, { method: "DELETE" });
+  await parseJson<void>(response);
 }

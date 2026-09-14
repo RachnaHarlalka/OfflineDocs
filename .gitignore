@@ -17,3 +17,5 @@ dist
 .windsurf
 skills-lock.json
 apps/server/src/generated/prisma
+# Playwright storage states hold real signed tokens
+e2e/.auth/

@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
-import { SessionCard } from "./session-card";
+import { DocumentTable } from "@/components/documents/document-table";
+import { DOCUMENTS_PAGE_LABELS } from "@/constants/labels";
 
 export const metadata: Metadata = { title: "Dashboard · DocSync" };
 
 export default function DashboardPage() {
   return (
-    <main className="mx-auto w-full max-w-2xl px-5 py-10 sm:px-8">
-      <SessionCard />
-    </main>
+    <div className="px-4 py-5 sm:px-8 sm:py-7">
+      <h1 className="mb-5.5 text-page-title">{DOCUMENTS_PAGE_LABELS.title}</h1>
+      <DocumentTable />
+    </div>
   );
 }

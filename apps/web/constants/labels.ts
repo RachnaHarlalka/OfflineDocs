@@ -77,9 +77,106 @@ export const SESSION_LABELS = {
   unreachableTitle: "Could not reach the server",
 } as const;
 
-export const DASHBOARD_LABELS = {
-  title: "Signed in",
-  name: "Name",
-  email: "Email",
-  memberSince: "Member since",
+export const APP_SHELL_LABELS = {
+  searchPlaceholder: "Search documents",
+  newDocument: "New document",
+  creatingDocument: "Creating…",
+  allDocuments: "All documents",
+  sharedWithMe: "Shared with me",
+  recent: "Recent",
+  account: "Account",
+  profile: "Profile",
+  settings: "Settings",
+  offlineTitle: "Offline ready",
+  offlineBody: "Documents you open are kept on this device.",
+  openNavigation: "Open navigation",
+  closeNavigation: "Close navigation",
+  theme: "Theme",
+} as const;
+
+export const DOCUMENTS_PAGE_LABELS = {
+  title: "All documents",
+  columnName: "Name",
+  columnUpdated: "Last modified",
+  columnAccess: "Access",
+  columnStatus: "Status",
+  errorTitle: "Could not load your documents",
+  retry: "Try again",
+  emptyTitle: "Create your first document",
+  emptyBody:
+    "Write, edit offline, and save when you're ready. Share it with your team as an editor or viewer at any time.",
+} as const;
+
+export const DOCUMENT_ROW_LABELS = {
+  rowActions: "Document actions",
+  viewDetails: "Details",
+  rename: "Rename",
+  renamePlaceholder: "Document title",
+  share: "Share",
+  duplicate: "Duplicate",
+  duplicating: "Duplicating…",
+  leave: "Leave",
+  leaving: "Leaving…",
+  confirmLeave: "Leave this document?",
+  leaveDescription: "You'll lose access to this document. You can be re-invited later.",
+  delete: "Delete",
+  deleting: "Deleting…",
+  confirmDelete: "Delete this document?",
+  deleteDescription: "Deleting a document removes it for every collaborator. This cannot be undone.",
+  cancel: "Cancel",
+} as const;
+// renameSave / renameCancel and DOC_DRAWER_LABELS.close were part of an
+// earlier iteration (an explicit Save/Cancel pair, a custom "Close" text
+// button) superseded by inline Enter/Escape rename and DialogContent's own
+// close-X — removed rather than left unreferenced.
+
+export const DOC_DRAWER_LABELS = {
+  documentSection: "Document",
+  owner: "Owner",
+  yourRole: "Your role",
+  status: "Status",
+  members: "Members",
+  created: "Created",
+  updated: "Last modified",
+  open: "Open",
+  manageAccess: "Manage access",
+} as const;
+
+export const SHARE_PANEL_LABELS = {
+  title: "Share document",
+  invitePeople: "Invite people",
+  emailPlaceholder: "name@company.com",
+  sendInvite: "Send invite",
+  sendInviteShort: "Invite",
+  sending: "Sending…",
+  done: "Done",
+  roleHint: "Editors can write and save. Viewers can only read.",
+  peopleWithAccess: "People with access",
+  you: "(you)",
+  removeAccess: "Remove access",
+  confirmRemoveTitle: "Remove access?",
+  removeDescriptionSuffix: "will lose access to this document. This can't be undone.",
+  removing: "Removing…",
+  cancel: "Cancel",
+  inviteErrorFallback: "Something went wrong sending that invite.",
+} as const;
+
+export const EDITOR_LABELS = {
+  titlePlaceholder: "Untitled document",
+  bodyPlaceholder: "Start writing…",
+  save: "Save",
+  saving: "Saving…",
+  saveFailed: "Couldn't save. Try again.",
+  retry: "Retry",
+  viewOnly: "View only",
+  offlineHint: "You're offline — reconnect to save.",
+  loadErrorTitle: "Couldn't load this document",
+} as const;
+
+export const SYNC_STATE_LABELS = {
+  draft: "Draft",
+  saving: "Saving…",
+  saved: "Saved",
+  offline: "Offline",
+  error: "Save failed",
 } as const;

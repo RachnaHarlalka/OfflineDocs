@@ -1,7 +1,7 @@
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
   "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
@@ -28,6 +28,11 @@ const badgeVariants = cva(
         warning: "border-warning/25 bg-warning-soft text-warning",
         /* Non-status: feature pills, active nav, owner badge. */
         brand: "border-primary/25 bg-primary-soft text-primary",
+        /* Editor/Viewer role chips. */
+        neutral: "bg-accent text-foreground",
+        /* Draft sync state. --neutral is dot-only at 2.36:1 contrast as text,
+           so the label itself uses muted-foreground, not --neutral. */
+        draft: "bg-accent text-muted-foreground",
       },
       size: {
         default: "",
@@ -36,6 +41,10 @@ const badgeVariants = cva(
            on a status word — so the size is explicit, but it lives here once rather than
            inline at each call site. */
         sm: "h-[1.125rem] px-2 py-px text-[0.65625rem]/[1.35]",
+        /* 24px / 11.5px, per the dashboard design's badge spec (role chips,
+           status pills) — a distinct step from `sm`'s login-page pills, not
+           an inline override, so every dashboard badge reads from one place. */
+        md: "h-6 gap-1.5 px-2.25 text-[11.5px]",
       },
     },
     defaultVariants: {

@@ -7,6 +7,7 @@ export const ROUTES = {
   dashboard: "/dashboard",
   /** The design-system proof sheet. Temporary — see the note in its page. */
   design: "/design",
+  doc: (id: string) => `/doc/${id}`,
 } as const;
 
 /** Backend endpoints, relative to NEXT_PUBLIC_API_ORIGIN. */
@@ -15,4 +16,11 @@ export const API = {
   refresh: "/auth/refresh",
   logout: "/auth/logout",
   googleLogin: "/auth/google",
+  docs: "/docs",
+  doc: (id: string) => `/docs/${id}`,
+  docDuplicate: (id: string) => `/docs/${id}/duplicate`,
+  docCollaborators: (docId: string) => `/docs/${docId}/collaborators`,
+  docCollaborator: (docId: string, userId: string) =>
+    `/docs/${docId}/collaborators/${userId}`,
+  docSave: (id: string) => `/docs/${id}/save`,
 } as const;

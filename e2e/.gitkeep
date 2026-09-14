@@ -1,0 +1,3 @@
+# playwright.config.ts sets testDir: "./e2e". This directory existing keeps
+# `pnpm test:e2e` from failing on a missing path. No specs yet — the blocker is
+# an authenticated storage state; see .qa/config.yml `e2e.auth_setup`.

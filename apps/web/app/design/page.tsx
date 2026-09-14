@@ -1,5 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SyncBadge } from "@/components/documents/sync-badge";
+import { RoleChip } from "@/components/documents/role-chip";
+import { EmptyState } from "@/components/documents/empty-state";
+import { DocumentRowSkeleton } from "@/components/documents/document-row-skeleton";
+import type { SyncState } from "@/lib/documents/sync-state";
+
+const ALL_SYNC_STATES: SyncState[] = ["draft", "saving", "saved", "offline", "error"];
 
 function Section({
   title,
@@ -112,6 +119,31 @@ export default function Home() {
           >
             Save failed
           </Badge>
+        </div>
+      </Section>
+
+      <Section title="Documents · Part 1 presentational components">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {ALL_SYNC_STATES.map((state) => (
+              <SyncBadge key={state} state={state} />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <RoleChip role="owner" />
+            <RoleChip role="editor" />
+            <RoleChip role="viewer" />
+          </div>
+          <ul className="max-w-md rounded-lg border border-border">
+            <DocumentRowSkeleton />
+            <DocumentRowSkeleton />
+            <DocumentRowSkeleton />
+          </ul>
+          <div className="max-w-md rounded-lg border border-border">
+            <EmptyState>
+              <Button>New document</Button>
+            </EmptyState>
+          </div>
         </div>
       </Section>
 
