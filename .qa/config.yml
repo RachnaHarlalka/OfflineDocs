@@ -321,6 +321,15 @@ run:
   #   auto      scored from the diff — critical-path match, migrations, churn,
   #             and historical defect density for the touched files.
   tier: auto
+
+  # How many plan -> implement+hunt -> adjudicate rounds a run may take.
+  #
+  # The loop has four exits (cap, budget, empty work order, blocked) and this is
+  # the blunt one. Without it a planner that keeps finding follow-up work never
+  # stops. Start at 3; if runs consistently terminate at round 1, drop it to 2
+  # and save a planner invocation.
+  max_rounds: 3
+
   min_priority: P2
   max_scenarios:
     quick: 0
