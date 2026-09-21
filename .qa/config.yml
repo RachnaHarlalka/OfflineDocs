@@ -297,7 +297,7 @@ run:
   # learning project and writing the code themselves is the point. QA agents
   # plan and report; they write test code only when asked for it by name
   # (/qa-implement). Do not raise this without the owner saying so.
-  autonomy: propose
+  autonomy: auto
 
   default_mode: changed
   fail_fast: false
@@ -352,7 +352,7 @@ run:
   # `related` costs seconds rather than tokens. `new` is the right choice when
   # you are running the suite yourself anyway, or in CI, and want the plugin to
   # confirm only its own work.
-  execution: manual
+  execution: auto
   test_commands:
     # `dir` is where the command runs from. pnpm --filter changes the working
     # directory, so paths must be relative to it — without this, vitest silently
