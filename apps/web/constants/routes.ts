@@ -1,3 +1,6 @@
+/** The dashboard's `?view=` param. Read client-side only — see `sw.js` handleNavigation. */
+export const DASHBOARD_VIEW = { param: "view", shared: "shared" } as const;
+
 /** Every in-app path. Nothing should hardcode a route string. */
 export const ROUTES = {
   home: "/",
@@ -5,6 +8,7 @@ export const ROUTES = {
   /** Where the API redirects the browser once it has set the session cookies. */
   authCallback: "/auth/callback",
   dashboard: "/dashboard",
+  sharedWithMe: `/dashboard?${DASHBOARD_VIEW.param}=${DASHBOARD_VIEW.shared}`,
   /** The design-system proof sheet. Temporary — see the note in its page. */
   design: "/design",
   /** Served by the service worker when a page has no cached copy. */

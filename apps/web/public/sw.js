@@ -543,6 +543,17 @@ async function handleNavigation(request, url) {
   try {
     return await networkFirst(request, SHELL_CACHE);
   } catch (error) {
+    /* The dashboard's ?view= is read client-side only, so its bare HTML is the
+       right shell for any variant. Keep it that way, or this serves the wrong page. */
+    if (url.pathname === "/dashboard") {
+      const shell = await caches.match(request, {
+        cacheName: SHELL_CACHE,
+        ignoreSearch: true,
+        ignoreVary: true,
+      });
+      if (shell) return shell;
+    }
+
     /* ignoreSearch: the offline page is precached bare, but is requested with
        its ?from parameter. */
     const fallback = await caches.match(OFFLINE_URL, {

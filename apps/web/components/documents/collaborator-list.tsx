@@ -33,6 +33,8 @@ export interface CollaboratorListProps {
   label: string;
   collaborators: DocCollaboratorDto[];
   currentUserId?: string;
+  /** Keeps the role menus visible but inert, e.g. while offline. */
+  disabled?: boolean;
   onChangeRole?: (userId: string, role: AssignableCollaboratorRole) => void;
   onRequestRemove?: (userId: string, name: string) => void;
 }
@@ -41,6 +43,7 @@ export function CollaboratorList({
   label,
   collaborators,
   currentUserId,
+  disabled = false,
   onChangeRole,
   onRequestRemove,
 }: CollaboratorListProps) {
@@ -91,7 +94,7 @@ export function CollaboratorList({
               {interactive && role !== "owner" ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    render={<Button variant="outline" size="sm" />}
+                    render={<Button variant="outline" size="sm" disabled={disabled} />}
                   >
                     {ASSIGNABLE_ROLE_LABEL[role]}
                     <ChevronDown />

@@ -15,6 +15,8 @@ import { markDocDirty } from "@/lib/documents/dirty-docs";
 // neither of which this suite triggers.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
+  // No ?view= — the default "All documents" list.
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // fetchDocs is mocked so DocumentTable's background queryFn has somewhere to

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentDetailsDrawer } from "@/components/documents/document-details-drawer";
 import { DocumentRow } from "@/components/documents/document-row";
@@ -16,6 +17,7 @@ import { useSession } from "@/lib/auth/use-session";
 import { useDirtyDocIds } from "@/lib/documents/use-dirty-doc-ids";
 import { usePendingByDoc } from "@/lib/offline/use-save-queue";
 import { useDocs } from "@/lib/documents/use-documents";
+import { isSharedWithMe, useDashboardView } from "@/lib/documents/use-dashboard-view";
 
 export function DocumentTable() {
   const {
@@ -25,9 +27,12 @@ export function DocumentTable() {
     columnStatus,
     columnName,
     columnAccess,
+    sharedEmptyTitle,
+    sharedEmptyBody,
   } = DOCUMENTS_PAGE_LABELS;
 
   const { data, isPending, isError, error, refetch } = useDocs();
+  const view = useDashboardView();
 
   const { data: session } = useSession();
   const [detailsDocId, setDetailsDocId] = useState<string | null>(null);
@@ -74,8 +79,13 @@ export function DocumentTable() {
     );
   }
 
-  if (data.length === 0) {
-    return (
+  const docs = view === "shared" ? data.filter(isSharedWithMe) : data;
+  const shareDoc = data.find((d) => d.id === shareDocId);
+
+  if (docs.length === 0) {
+    return view === "shared" ? (
+      <EmptyState icon={Users} title={sharedEmptyTitle} body={sharedEmptyBody} />
+    ) : (
       <EmptyState>
         <NewDocumentButton />
       </EmptyState>
@@ -100,7 +110,7 @@ export function DocumentTable() {
         <span className="w-8 shrink-0" />
       </div>
       <ul aria-busy="false" className="divide-y divide-border">
-        {data.map((doc) => (
+        {docs.map((doc) => (
           <DocumentRow
 
             key={doc.id}
@@ -125,11 +135,13 @@ export function DocumentTable() {
         onManageAccess={setShareDocId}
       />
 
-      <SharePanel
-        docId={shareDocId}
-        currentUserId={session?.id}
-        onClose={() => setShareDocId(null)}
-      />
+      {shareDoc ? (
+        <SharePanel
+          doc={shareDoc}
+          currentUserId={session?.id}
+          onClose={() => setShareDocId(null)}
+        />
+      ) : null}
     </div>
   );
 }

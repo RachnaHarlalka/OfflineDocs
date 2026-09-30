@@ -105,6 +105,10 @@ export const DOCUMENTS_PAGE_LABELS = {
   emptyTitle: "Create your first document",
   emptyBody:
     "Write, edit offline, and save when you're ready. Share it with your team as an editor or viewer at any time.",
+  sharedTitle: "Shared with me",
+  sharedEmptyTitle: "Nothing shared with you yet",
+  sharedEmptyBody:
+    "Documents someone invites you to as an editor or viewer show up here.",
 } as const;
 
 export const DOCUMENT_ROW_LABELS = {
@@ -163,6 +167,8 @@ export const SHARE_PANEL_LABELS = {
   removing: "Removing…",
   cancel: "Cancel",
   inviteErrorFallback: "Something went wrong sending that invite.",
+  offlineNotice: "Sharing needs a connection. Changes to access can't be made offline.",
+  membersOffline: "The member list loads when you're back online.",
 } as const;
 
 export const EDITOR_LABELS = {
@@ -173,6 +179,7 @@ export const EDITOR_LABELS = {
   saveFailed: "Couldn't save. Try again.",
   retry: "Retry",
   viewOnly: "View only",
+  share: "Share",
   offlineHint: "You're offline — saves are kept on this device and sync when you reconnect.",
   loadErrorTitle: "Couldn't load this document",
 } as const;

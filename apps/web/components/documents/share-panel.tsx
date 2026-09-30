@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { AssignableCollaboratorRole } from "@docsync/shared";
+import type { AssignableCollaboratorRole, Doc } from "@docsync/shared";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DialogClose } from "@/components/ui/dialog";
@@ -19,13 +19,13 @@ import { PanelShell } from "@/components/documents/panel-shell";
 import { docErrorMessage, FALLBACK_DOC_ERROR } from "@/constants/errors";
 import { SHARE_PANEL_LABELS } from "@/constants/labels";
 import { ApiError } from "@/lib/api/client";
-import { useDocs } from "@/lib/documents/use-documents";
 import {
   useChangeCollaboratorRole,
   useCollaborators,
   useInviteCollaborator,
   useRemoveCollaborator,
 } from "@/lib/documents/use-collaborators";
+import { useOnlineStatus } from "@/lib/offline/use-online-status";
 
 function mutationErrorMessage(error: unknown): string | null {
   if (!error) return null;
@@ -35,11 +35,12 @@ function mutationErrorMessage(error: unknown): string | null {
 }
 
 export function SharePanel({
-  docId,
+  doc,
   currentUserId,
   onClose,
 }: {
-  docId: string | null;
+  /** Mount only while open — closing unmounts it, which also discards a half-typed invite. */
+  doc: Pick<Doc, "id" | "title">;
   currentUserId: string | undefined;
   onClose: () => void;
 }) {
@@ -58,15 +59,20 @@ export function SharePanel({
     removing: removingLabel,
     cancel,
     done,
+    offlineNotice,
+    membersOffline,
   } = SHARE_PANEL_LABELS;
 
-  const { data: docs } = useDocs();
-  const doc = docs?.find((d) => d.id === docId);
+  const collaborators = useCollaborators(doc.id);
+  const invite = useInviteCollaborator(doc.id);
+  const changeRole = useChangeCollaboratorRole(doc.id);
+  const remove = useRemoveCollaborator(doc.id);
 
-  const collaborators = useCollaborators(docId);
-  const invite = useInviteCollaborator(docId ?? "");
-  const changeRole = useChangeCollaboratorRole(docId ?? "");
-  const remove = useRemoveCollaborator(docId ?? "");
+  // Access changes aren't queued offline. A transport failure counts too:
+  // navigator.onLine stays true on a network that can't reach the API.
+  const online = useOnlineStatus();
+  const unreachable =
+    !online || (collaborators.isError && !(collaborators.error instanceof ApiError));
 
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] =
@@ -77,10 +83,7 @@ export function SharePanel({
   } | null>(null);
 
   function handleOpenChange(next: boolean) {
-    if (next) return;
-    setEmail("");
-    invite.reset();
-    onClose();
+    if (!next) onClose();
   }
 
   function sendInvite() {
@@ -91,8 +94,6 @@ export function SharePanel({
       { onSuccess: () => setEmail("") },
     );
   }
-
-  if (!doc) return null;
 
   return (
     <>
@@ -106,6 +107,15 @@ export function SharePanel({
           </DialogClose>
         }
       >
+        {unreachable ? (
+          <p
+            role="status"
+            className="mb-5 rounded-md border border-warning/25 bg-warning-soft px-3 py-2 text-caption text-warning"
+          >
+            {offlineNotice}
+          </p>
+        ) : null}
+
         <div>
           <p className="text-label uppercase text-muted-foreground">
             {invitePeople}
@@ -116,7 +126,7 @@ export function SharePanel({
               type="email"
               value={email}
               placeholder={emailPlaceholder}
-              disabled={invite.isPending}
+              disabled={invite.isPending || unreachable}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -134,7 +144,7 @@ export function SharePanel({
                     variant="outline"
                     size="sm"
                     className="flex-1 justify-between md:flex-none"
-                    disabled={invite.isPending}
+                    disabled={invite.isPending || unreachable}
                   />
                 }
               >
@@ -159,7 +169,7 @@ export function SharePanel({
 
             <Button
               className="shrink-0 md:w-full"
-              disabled={invite.isPending || !email.trim()}
+              disabled={invite.isPending || unreachable || !email.trim()}
               onClick={sendInvite}
             >
               {invite.isPending ? (
@@ -184,13 +194,18 @@ export function SharePanel({
           ) : null}
         </div>
         <div className="mt-5 border-t border-border pt-5">
-          <CollaboratorList
-            label={peopleWithAccess}
-            collaborators={collaborators.data ?? []}
-            currentUserId={currentUserId}
-            onChangeRole={(userId, role) => changeRole.mutate({ userId, role })}
-            onRequestRemove={(userId, name) => setRemoving({ userId, name })}
-          />
+          {unreachable && !collaborators.data ? (
+            <p className="text-caption text-muted-foreground">{membersOffline}</p>
+          ) : (
+            <CollaboratorList
+              label={peopleWithAccess}
+              collaborators={collaborators.data ?? []}
+              currentUserId={currentUserId}
+              disabled={unreachable}
+              onChangeRole={(userId, role) => changeRole.mutate({ userId, role })}
+              onRequestRemove={(userId, name) => setRemoving({ userId, name })}
+            />
+          )}
         </div>
       </PanelShell>
 

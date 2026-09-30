@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { PresenceUser } from "@docsync/shared";
 import { PRESENCE_LABELS } from "@/constants/labels";
 
@@ -29,6 +30,28 @@ function tintFor(userId: string): string {
     hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
   }
   return CHIP_TINTS[hash % CHIP_TINTS.length]!;
+}
+
+/**
+ * The Google photo when it loads, initials when it doesn't — Google rate-limits
+ * hotlinked avatars, and the worker doesn't cache them for offline.
+ */
+function ChipAvatar({ name, avatarUrl }: Pick<PresenceUser, "name" | "avatarUrl">) {
+  const [failed, setFailed] = useState(false);
+
+  if (!avatarUrl || failed) return initials(name);
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={avatarUrl}
+      alt=""
+      // Google serves these far more reliably without a cross-site Referer.
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="size-full rounded-full object-cover"
+    />
+  );
 }
 
 function describe(people: PresenceUser[]): string {
@@ -65,16 +88,8 @@ export function PresenceChips({ people }: { people: PresenceUser[] }) {
           aria-hidden="true"
           className={`flex size-7 items-center justify-center rounded-full border-2 border-card text-caption font-medium ${tintFor(person.userId)}`}
         >
-          {person.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={person.avatarUrl}
-              alt=""
-              className="size-full rounded-full object-cover"
-            />
-          ) : (
-            initials(person.name)
-          )}
+          {/* Keyed on the URL so a new photo gets a fresh attempt. */}
+          <ChipAvatar key={person.avatarUrl} name={person.name} avatarUrl={person.avatarUrl} />
         </span>
       ))}
 
