@@ -45,7 +45,8 @@ export const QUEUE_BUDGET_BYTES = 50 * 1024 * 1024;
 export const QUEUE_WARN_BYTES = 40 * 1024 * 1024;
 /** Half the budget, so dictation can never crowd out a queued save. */
 export const QUEUE_AUDIO_BUDGET_BYTES = 25 * 1024 * 1024;
-/** Bounds one pathological entry. */
+/** Bounds one pathological entry. Mirrored by the API's own body limit
+ *  (server: app.ts) — a save this side accepts must be one the server will take. */
 export const QUEUE_ITEM_MAX_BYTES = 5 * 1024 * 1024;
 
 /**

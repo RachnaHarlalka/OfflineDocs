@@ -1,0 +1,253 @@
+change: "Offline-first draft restore, presence backup, SW update takeover, queue/body caps, auth session gating"
+scope: "same 13-file staged diff on main; round 1 focused on Test Basis (AC-201..AC-225) vs code conformance, plus a live pass against http://localhost:4000"
+round: 1
+pass: static + live
+counts:
+  confirmed: 2
+  likely: 1
+  speculative: 0
+  total: 3
+
+findings:
+  - id: H-10
+    title: "A delete-only unsaved draft is never offered back: hasContentBeyond compares state vectors, which deletions do not move (AC-209/AC-204)"
+    confidence: confirmed
+    severity: high
+    category: data-integrity
+    basis: [AC-204, AC-206, AC-209]
+    where:
+      - apps/web/lib/documents/use-yjs-doc.ts:71-79   # hasUpdatesBeyond
+      - apps/web/lib/documents/use-yjs-doc.ts:242-249 # hasContentBeyond
+      - apps/web/components/documents/doc-editor.tsx:159-166
+    claim: >
+      `hasContentBeyond` decides whether a server-side backup is worth offering by asking
+      `hasUpdatesBeyond`, which compares *state vectors only* - per-client clocks. A Yjs
+      deletion creates no new struct and therefore does not advance any client's clock, so a
+      backup whose only difference from the current document is deleted text scores as
+      "nothing beyond". `restorableDraft` stays null, the notice never renders, and the
+      user's unsaved deletions are silently unrecoverable. AC-204 requires the notice
+      whenever "the backup holds content the document lacks"; removed text is content the
+      document (wrongly) still has.
+    why: >
+      use-yjs-doc.ts:75-77 iterates the backup doc's state vector and returns true only when
+      some client clock exceeds the current doc's. The delete set is never consulted. This
+      file already states the premise explicitly at its `localEditCount` comment: "deleting
+      text creates no new struct, so a delete-only edit leaves the vector unmoved." That
+      comment is the proof for this finding - the code relies on the fact in one place and
+      forgets it in another.
+    trigger: >
+      Owner/editor. Open a saved document, select a paragraph, delete it, do not save, let a
+      heartbeat back it up (25s), then clear site data (or open on a second device) and
+      reopen the document. Expected: "Unsaved draft found". Actual: no notice at all.
+    impact: >
+      A whole class of unsaved edit - deletions and cut-and-move reorganisation, where the
+      net effect is removal - is invisible to the recovery feature that exists to return it.
+      Silent: nothing logs, nothing turns red.
+    found_by: static
+    evidence: >
+      Read of use-yjs-doc.ts:71-79 and 242-249; the same file's own documented premise about
+      delete-only edits and state vectors. Not executed - a unit test on hasContentBeyond
+      with a delete-only update confirms it in seconds.
+    suggested_test: >
+      unit (apps/web, vitest --project web): build a Y.Doc, insert text, encode as the
+      document's seed; clone, delete a range, encodeStateAsUpdate as the "backup"; assert
+      hasContentBeyond(backup) === true. Fails today.
+    suggested_fix_direction: >
+      Compare the merged result rather than the vector - e.g. apply the backup to a clone of
+      the current doc and test whether the body text changes - or additionally diff the
+      delete sets.
+
+  - id: H-11
+    title: "A second tab's page load silently swaps the worker under an open, dirty editor - no banner, no consent (AC-222)"
+    confidence: confirmed
+    severity: high
+    category: state-machine
+    basis: [AC-221, AC-222]
+    relates_to: H-5
+    where:
+      - apps/web/lib/pwa/use-service-worker.ts:47-49   # unconditional SKIP_WAITING at load
+      - apps/web/public/sw.js:405-410                  # SKIP_WAITING handler
+      - apps/web/public/sw.js:114-126                  # activate -> self.clients.claim()
+    claim: >
+      The load-time SKIP_WAITING is reasoned about as if the tab posting it were the only
+      tab ("nothing typed, nothing mid-save"). It is not. `self.clients.claim()` in the
+      worker's activate handler takes over *every* open client, so tab B merely being opened
+      activates the new worker and re-controls tab A, which may be mid-edit and dirty. AC-222
+      requires that a dirty open document get the banner and "not reload or swap on its own";
+      it swaps, driven by a sibling tab, with no banner anywhere. This is distinct from H-5,
+      which is the same-tab stale-chunk consequence; this is the consent violation and the
+      cross-tab trigger.
+    why: >
+      use-service-worker.ts:47-49 posts SKIP_WAITING for any `registration.waiting` on every
+      mount, with no check for whether other clients exist or whether any of them is dirty.
+      sw.js:409 calls `self.skipWaiting()`, sw.js:126 calls `await self.clients.claim()`,
+      which is scoped to the registration, not the requesting client.
+    trigger: >
+      Deploy a new sw.js while tab A has a document open with unsaved edits. Open the app in
+      tab B. Tab A's controller changes to the new worker; tab A shows no banner and never
+      reloads.
+    impact: >
+      Editing continues in tab A against a worker whose caches and flush logic it was not
+      built for; AC-222's explicit "does not swap on its own" guarantee is void as soon as a
+      second tab exists. This is the run's open question U-3 / PRD Q-1, and AC-222 now
+      supplies the oracle: the answer is that today's behaviour is wrong.
+    found_by: static
+    evidence: >
+      Code read as cited. Live attempt to force a second worker into `waiting` by
+      re-registering /sw.js under a different query string did not produce a waiting worker
+      (the app's own registration of ?v=dev won); the mechanism could not be exercised in the
+      running app without a genuine second build. See "could_not_investigate".
+    suggested_test: >
+      e2e (Playwright, two tabs sharing a context) or a unit test on watchForUpdate with a
+      stubbed registration: assert SKIP_WAITING is not posted when another client is dirty,
+      or that the banner appears in the dirty tab.
+    suggested_fix_direction: >
+      Gate the load-time skip on this being the only client (clients.matchAll in the worker)
+      and/or on no dirty document, and have the claimed client reload rather than continue on
+      stale JS.
+
+  - id: H-12
+    title: "A worker already installing when the page loads never raises the update banner (AC-222)"
+    confidence: likely
+    severity: medium
+    category: silent-failure
+    basis: [AC-222]
+    where:
+      - apps/web/lib/pwa/use-service-worker.ts:47-62
+    claim: >
+      `watchForUpdate` handles exactly two cases: a worker already in `waiting` (auto-skip)
+      and a worker whose `updatefound` fires after the listener is attached. It never checks
+      `registration.installing`. A worker that was mid-install when `register()` resolved has
+      already fired `updatefound`, so nothing hears it reach `installed`; `updateReady` stays
+      false and the banner never appears. AC-222 requires the banner for an update that
+      installs while the document is open and dirty - which is precisely the window this miss
+      falls in.
+    why: >
+      use-service-worker.ts:52-62 attaches the `statechange` listener only from inside the
+      `updatefound` handler. There is no `if (registration.installing) { ...same listener... }`
+      arm, and the waiting arm at :47 skips rather than banners.
+    trigger: >
+      Load the app while a new sw.js is already installing (a deploy landing during a hard
+      reload, or a slow install started by a previous navigation). Type into a document.
+      Expected: update banner. Actual: none, until the next page load auto-applies it via :47.
+    impact: >
+      The user is never offered the update they were supposed to be offered; instead it is
+      taken silently on their next load (feeding H-5 and H-11). Narrow timing window, but no
+      signal at all when it hits.
+    found_by: static
+    evidence: >
+      Code read as cited. Not reproduced live - forcing an install-in-progress at mount needs
+      a throttled sw.js response.
+    suggested_test: >
+      unit (apps/web): render useServiceWorker with a stubbed registration whose `installing`
+      is a fake worker in state "installing" and a non-null controller; drive it to
+      "installed"; assert updateReady === true.
+    suggested_fix_direction: >
+      Factor the statechange watcher out and call it for `registration.installing` at mount as
+      well as from `updatefound`.
+
+live_pass:
+  environment: "web http://localhost:4000 (200), api http://localhost:3000 (200), both already running; postgres persistent"
+  auth: >
+    NOT achieved. e2e/.auth/{owner,editor,viewer}.json exist but their docsync_access JWTs
+    expired (iat 1789909980, exp 1789910880 - a 15-minute token minted before today). Fresh
+    states need `pnpm --filter server seed:e2e`, which reseeds the database; five qa-implementer
+    agents were mid-flight writing tests, so I did not run it. Everything below is therefore
+    from the unauthenticated surface plus the worker registration, which is global to the origin.
+  observed:
+    - "GET / on an anonymous browser redirects to /login and renders the sign-in page - AC-224 behaves as specified (anonymous, not mid-flow)."
+    - "Console on /login carries exactly one error: 401 from http://localhost:3000/auth/me. Expected for an anonymous session probe, but it is an unhandled console error on the app's default landing state - worth a deliberate decision rather than noise that masks a real one."
+    - "Service worker registers and reaches `activated` with the page controlled by /sw.js?v=dev&api=... - registration path and query-string config work."
+  verdicts:
+    H-2: could-not-reach
+    H-5: could-not-reach
+    H-7: could-not-reach
+  verdict_notes: >
+    All three need an authenticated editor session on a seeded document (H-2, H-7) or a second
+    genuine sw.js build (H-5). Neither was available under this round's constraints. Re-attempt
+    after seed:e2e is safe to run, with a doc primed in IndexedDB and the draft GET throttled;
+    H-5 additionally needs a build whose sw.js bytes differ.
+
+checked_and_clean:
+  - area: "Inputs and boundaries"
+    checked: "Backup payload shapes through useOwnDraft/doc-editor: null, undefined, absent field; the notice's backedUpAt through relativeTime; the 5MB caps."
+    result: "null/undefined short-circuit at doc-editor.tsx:161 `if (!backup) return;` - AC-213 holds, the gate opens, later backups are not blocked. The 5MB envelope band is H-4, already filed."
+  - area: "State machine"
+    checked: "Notice lifecycle: appear, restore, dismiss, type-after-read, double-press, viewer, offline, remount."
+    result: "AC-205/AC-208/AC-210 hold - hasContentBeyondRef is evaluated once on backup arrival (deps [ownDraft.data]) so typing neither summons nor dismisses the notice; both buttons clear restorableDraft. AC-202/AC-203 hold - useOwnDraft is enabled on `online && !isViewer`, and isViewer is synchronous from doc.role (doc-editor.tsx:107), so there is no window where a viewer's request escapes."
+  - area: "Time and ordering"
+    checked: "Heartbeat vs draft-read ordering for AC-211; staleTime Infinity and AC-201's 'exactly once'."
+    result: "Clean except via H-1's error path (already filed). canBackUp waits on isPending; staleTime Infinity + key ['docs','detail',id,'draft'] keeps it to one GET across online/offline flapping."
+  - area: "Concurrency"
+    checked: "Two tabs on the same document; two tabs and the worker lifecycle."
+    result: "Worker case is H-11. Two tabs editing share IndexedDB via y-indexeddb and merge at the CRDT level - no new finding."
+  - area: "Authorisation"
+    checked: "Every changed surface: the draft GET's role gate, the heartbeat's canBackUp, the readOnly/disabled controls, the layout reorder."
+    result: "No change to server-side authz in this diff; the layout reorder moves only chrome, not the gate (RequireSession still wraps children). No horizontal-escalation surface introduced."
+  - area: "Data integrity"
+    checked: "Y.Doc seeding, the new seededSnapshot freeze, restoreDraft's effect on isDirty/markDocDirty, the dashboard badge."
+    result: "AC-206's four consequences all follow from the `update` listener at use-yjs-doc.ts:130-136. AC-215/AC-217 hold: DocEditorLoaded is keyed `key={doc.id}` (doc-editor.tsx:68), so the freeze cannot leak one document's Y.Doc into another. The delete-set blind spot is H-10."
+  - area: "Failure and degradation"
+    checked: "Draft GET 500/timeout/malformed; sw.js dropCachedDoc; registration failure."
+    result: "AC-212 holds for rendering (retry:false, error swallowed, editor unaffected) - but the same swallow is H-1's mechanism. Registration failure is warned and the app continues. ignoreVary fix on dropCachedDoc is correct for a Vary: Origin response."
+  - area: "Silent failure"
+    checked: "Every new catch, optional chain and un-surfaced error in the diff."
+    result: "H-10 and H-12 are both in this class. sw.js:214 console.warn-and-continue on a failed cache delete is pre-existing and bounded."
+  - area: "Frontend states / a11y / i18n"
+    checked: "DraftRestoreNotice roles and names; SessionPending className plumbing; label extraction."
+    result: "AC-214 holds exactly - role='status', strings all from DRAFT_RESTORE_LABELS, both controls are real buttons with accessible names. No hardcoded English outside constants/labels.ts."
+
+specified_but_not_implemented:
+  - ac: AC-209
+    requires: "A backup whose content the document already holds produces no notice"
+    code_does: "Inverse also broken: a backup holding *only* deletions the document lacks produces no notice either - see H-10. The vector comparison answers a narrower question than the AC asks."
+  - ac: AC-222
+    requires: "A dirty open document gets the banner and does not reload or swap on its own"
+    code_does: "Swaps without a banner when a sibling tab loads (H-11, via clients.claim); and never banners at all when the worker was already installing at mount (H-12)."
+
+could_not_investigate:
+  - "Live confirmation of H-2, H-5, H-7 - blocked on expired e2e storage states and on the reseed being unsafe while test-mode implementers were writing. Unblocked by: run `pnpm --filter server seed:e2e` once the test wave is idle, then load e2e/.auth/owner.json into the browser context."
+  - "H-5 and H-11 in the running app need two genuinely different sw.js builds; re-registering the same file under a different query string did not produce a waiting worker."
+  - "Whether a later doc refetch with a newer snapshot reaches reconcileWithServer at all (doc-editor.tsx:271-273 holds it in a ref). AC-215 is satisfied either way - edits survive - but if nothing calls it, the editor never picks up a collaborator's save for the life of the mount. Needs a live two-user session to settle."
+  - "The unhandled 401 from /auth/me on the anonymous landing state - whether it is intended or a missing guard."
+
+# ---------------------------------------------------------------------------
+# Index, in the report shape the toolchain reads. Details are in `findings:` above.
+report_markdown: |
+  # Adversarial review: round 1 — basis conformance + live pass
+
+  - **Scope:** same 13-file staged diff on main; basis AC-201..AC-225; live pass on localhost:4000
+  - **Confirmed:** 2 · **Likely:** 1 · **Speculative:** 0
+
+  ## Findings
+
+  ### H-10 — A delete-only unsaved draft is never offered back: hasContentBeyond compares state vectors, which deletions do not move  `confirmed` `sev:high` `AC-209/AC-204`
+  ### H-11 — A second tab's page load silently swaps the worker under an open, dirty editor, no banner, no consent  `confirmed` `sev:high` `AC-222`
+  ### H-12 — A worker already installing when the page loads never raises the update banner  `likely` `sev:medium` `AC-222`
+
+  ## Checked and clean
+
+  | Area | What I checked | Result |
+  |---|---|---|
+  | Inputs and boundaries | null/undefined/absent backup, backedUpAt, the 5MB caps | clean (AC-213 holds); 5MB band is H-4 |
+  | State machine | notice appear/restore/dismiss/type-after-read, viewer, offline, remount | clean — AC-202/203/205/208/210 hold |
+  | Time and ordering | heartbeat vs draft-read gate, staleTime Infinity, AC-201 once | clean except H-1's error path |
+  | Concurrency | two tabs on a document; two tabs and the worker | worker case is H-11; CRDT merge fine |
+  | Authorisation | draft GET role gate, canBackUp, readOnly controls, layout reorder | clean — no authz change in this diff |
+  | Data integrity | Y.Doc seeding, seededSnapshot freeze, restoreDraft dirty/badge | clean (AC-206/215/217 hold); delete-set blind spot is H-10 |
+  | Failure and degradation | draft GET 500/timeout, dropCachedDoc ignoreVary, registration failure | clean (AC-212 holds); swallow is H-1's mechanism |
+  | Silent failure | new catches, optional chains, un-surfaced errors | H-10 and H-12 are in this class |
+  | Frontend states / a11y / i18n | DraftRestoreNotice roles and names, SessionPending className, label extraction | clean — AC-214 holds exactly |
+
+  ## Specified but not implemented
+
+  | AC | What the basis requires | What the code does |
+  |---|---|---|
+  | AC-209 | no notice when the document already holds the backup's content | the inverse also fails: a deletions-only backup produces no notice (H-10) |
+  | AC-222 | dirty document gets the banner, never swaps on its own | swaps when a sibling tab loads (H-11); no banner at all if the worker was installing at mount (H-12) |
+
+  ## Could not investigate
+
+  Live verdicts on H-2, H-5 and H-7 are all **could-not-reach**: the e2e storage states'
+  JWTs have expired and reseeding was unsafe while the test wave was in flight; H-5 and
+  H-11 additionally need two genuinely different sw.js builds.

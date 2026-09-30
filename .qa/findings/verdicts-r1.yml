@@ -1,0 +1,186 @@
+round: r1
+run: 20260921-192748-cbfe7f8-6165
+adjudicator: qa-planner (fresh invocation, round 1)
+suite_result:
+  passed: 85
+  failed: 2
+  files_not_run: 28        # selection "related" — see work-order-r2 W-0
+status: blocked            # one undecided-spec (V-4). Fix wave still proceeds on V-1..V-3, V-5 per developer approval.
+
+verdicts:
+
+  - observation: TS-16b / app.test.ts:82 "refuses a body over 5MB + margin with 413 [AC-218]"
+    id: V-1
+    verdict: real-product-bug
+    confidence: high
+    basis: [AC-218]
+    root_cause: >
+      errorHandler (apps/server/src/middleware/error-handler.ts:17) translates only
+      `error instanceof AppError`. body-parser's PayloadTooLargeError carries
+      `.status = 413` / `.type = "entity.too.large"` but is not an AppError, so it falls
+      to the generic branch and the client sees 500. AC-218 requires 413.
+      `AppError.payloadTooLarge()` already exists (lib/http-error.ts:39) and is unused.
+    verified_independently: >
+      Read error-handler.ts and app.ts directly this round. The `instanceof AppError`
+      gate and the unused payloadTooLarge factory are both as the w05 report states.
+      Raw result confirms "expected 500 to be 413" — the cap itself fires, only the
+      translation is missing. w05's diagnosis accepted on the evidence, not on its word.
+    minimal_repro: "POST /docs/:id/save with a 5.5MB JSON body as an authenticated owner -> 500, expected 413"
+    reduced_to: integration
+    blast_radius:
+      - apps/server/src/middleware/error-handler.ts:17
+      - "every non-AppError thrown by middleware: body-parser malformed-JSON (400) and unsupported charset (415) are also flattened to 500"
+    work_order_item:
+      mode: fix
+      target: apps/server/src/middleware/error-handler.ts
+      what: "translate body-parser status-carrying errors to AppError before the AppError branch"
+      fix_detail_lives_in: ".qa/findings/phase2-hardening-draft-restore-implement-w05.md — 'Fix proposed, not applied' row 1"
+
+  - observation: TS-21 / app.test.ts:145 "a save the client's own queue-item check accepts at exactly QUEUE_ITEM_MAX_BYTES must not be permanently unsendable [AC-219][AC-225] (hunt H-4)"
+    id: V-2
+    verdict: real-product-bug
+    confidence: high
+    basis: [AC-219, AC-225]
+    root_cause: >
+      Two defects stacked. (a) The 500 rather than 413 is V-1's error-handler gap.
+      (b) Underneath it, the real H-4 defect: save-queue.ts:265 `enqueueSave` passes
+      `input.update.length` — the raw base64 string — to enqueue's
+      `if (bytes > QUEUE_ITEM_MAX_BYTES)` check (save-queue.ts:295), while the server's
+      `express.json({ limit: "5mb" })` counts the transmitted envelope
+      `JSON.stringify({ update })`, 13 bytes larger. Both constants are 5242880; this is a
+      byte-span mismatch, not drift. app.ts's own comment states the invariant this breaks:
+      "A lower limit here would let the client queue a save it can never send... the worker
+      would read the refusal as a transport failure and retry that document's queue forever."
+    verified_independently: >
+      Confirmed save-queue.ts:265 passes the raw `update.length` and :295 compares it to
+      QUEUE_ITEM_MAX_BYTES; confirmed queue-schema.ts:50 and app.ts's "5mb" are both
+      5242880. Envelope overhead reproduced arithmetically by the test itself.
+    minimal_repro: "enqueueSave with update.length === 5242880 -> accepted by the client; the flush POSTs a 5242893-byte body -> refused by the server, forever"
+    reduced_to: integration
+    blast_radius:
+      - apps/web/lib/offline/save-queue.ts:265
+      - apps/web/lib/offline/save-queue.ts:295
+      - apps/server/src/app.ts:29
+      - "one stuck queue item blocks that document's whole queue: the flush treats the refusal as transport failure and retries indefinitely"
+    remedy_chosen: >
+      Fix on the client: measure the bytes actually transmitted, not the raw update string.
+      This keeps the server cap at 5mb (so AC-218's 413 boundary is unmoved) and keeps the
+      two constants equal (AC-225). The alternative — raising the server limit by the
+      envelope overhead — would move AC-218's stated boundary and was rejected for that
+      reason. Recorded here so the fix wave does not re-litigate it.
+    work_order_item:
+      mode: fix
+      target: apps/web/lib/offline/save-queue.ts
+      what: "size the queue item by the transmitted envelope, not the raw update string"
+      fix_detail_lives_in: ".qa/findings/phase2-hardening-draft-restore-implement-w05.md — 'Fix proposed, not applied' row 1, second half (the H-4 byte-accounting gap)"
+    note: >
+      TS-21 as written cannot go green on either fix: it posts the exact boundary body
+      itself and demands 2xx. Once the client rejects that body, the assertion's premise
+      ("the client accepts this") is false. The test must be re-pinned to the invariant
+      rather than the raw-length premise — work-order item W-2, mode: test. That is a test
+      correction, not a loosening: the invariant asserted gets stronger, not weaker.
+
+  - observation: H-10 (hunt-r1, confirmed/high) "delete-only unsaved draft is never offered back"
+    id: V-3
+    verdict: real-product-bug
+    confidence: high
+    basis: [AC-204, AC-209]
+    root_cause: >
+      `hasContentBeyond` (use-yjs-doc.ts:242-249) delegates to `hasUpdatesBeyond`
+      (:71-79), which compares decoded state vectors only. A Yjs deletion creates no
+      struct and advances no client clock, so a backup differing from the live document
+      only by deletions scores as "nothing beyond", `restorableDraft` stays null and the
+      notice never renders. AC-204 requires the notice whenever the backup holds content
+      the document lacks; removed text is content the document wrongly still has.
+    verified_independently: >
+      Reproduced, not read. Ran yjs directly: seed "hello world", clone, delete "hello ",
+      encodeStateAsUpdate as the backup -> hasUpdatesBeyond(backup, vector(current))
+      returns FALSE while backup text is "world" and current is "hello world". The hunter's
+      claim holds exactly as stated.
+    minimal_repro: "hasContentBeyond(encodeStateAsUpdate(docWithOnlyADeletion)) === false"
+    reduced_to: unit
+    blast_radius:
+      - apps/web/lib/documents/use-yjs-doc.ts:242-249
+      - apps/web/lib/documents/use-yjs-doc.ts:71-79
+      - "hasUpdatesBeyond is also the isDirty oracle at :235 — a delete-only edit may likewise read as clean; NOT yet confirmed, W-4 must check before the fix lands"
+    work_order_item:
+      mode: test
+      target: apps/web/lib/documents/use-yjs-doc.test.ts
+      what: "gating unit test — delete-only backup must be restorable; must be red on unmodified source before any fix"
+    follow_on_fix: W-5   # fix only after the gating test is proven red
+
+  - observation: H-11 (hunt-r1, confirmed/high) "a sibling tab's load swaps the worker under an open dirty editor"
+    id: V-4
+    verdict: undecided-spec
+    confidence: high
+    basis: [AC-221, AC-222]
+    hunter_reading: "AC-222 now supplies the oracle U-3 / PRD Q-1 was blocked on, and today's behaviour is wrong."
+    adjudication: >
+      PARTLY CONFIRMED, and therefore not actionable. The mechanism is real and verified:
+      use-service-worker.ts:47-49 posts SKIP_WAITING for any `registration.waiting` on every
+      mount with no check for other clients, and sw.js:126 `self.clients.claim()` is scoped
+      to the registration, so a second tab's load does re-control a dirty tab A with no
+      banner. AC-222's literal text is violated in that case.
+      What I reject is the conclusion that AC-222 settles it. AC-221 mandates, just as
+      explicitly, the exact load-time skip that causes the swap, and says the banner must NOT
+      appear for a worker already waiting. For the multi-tab case the two ACs contradict each
+      other; AC-222 cannot be the oracle for a behaviour AC-221 requires. The remedy is a
+      design choice with at least three defensible answers (gate the skip on being the only
+      client; banner in dirty clients; have the claimed client reload). Choosing one is the
+      product decision PRD Q-1 / U-3 asks for, and it is not mine to take.
+      Treated the same way AC-212 / H-1 was: recorded open, not fixed.
+    question_for_human: >
+      PRD Q-1 / basis U-3: when a new worker is waiting and another tab has unsaved edits,
+      which wins — AC-221's silent takeover, or AC-222's consent? Answer decides whether the
+      load-time SKIP_WAITING is gated on `clients.matchAll()` being a single client.
+    work_order_item:
+      mode: none
+    blocks: [TS-18, TS-19 multi-tab variant]
+
+  - observation: H-12 (hunt-r1, likely/medium) "a worker already installing at mount never raises the banner"
+    id: V-5
+    verdict: real-product-bug
+    confidence: medium
+    basis: [AC-222]
+    root_cause: >
+      watchForUpdate (use-service-worker.ts:37-64) handles only `registration.waiting`
+      (auto-skip) and `updatefound` fired after the listener attaches. A worker mid-install
+      when `register()` resolved has already fired updatefound, so nothing hears it reach
+      `installed`; updateReady stays false and the banner never appears. Verified by reading
+      the hook: there is no `registration.installing` arm.
+    why_not_undecided: >
+      Unlike V-4 this has no AC-221 tension. AC-221 governs a worker already WAITING at load;
+      a worker still INSTALLING at load reaches installed afterwards, i.e. "an update that
+      arrives while you work", which is squarely AC-222's banner case. The hook's own comment
+      draws the same line. One oracle, no contradiction.
+    confidence_note: "medium not high because it is static-only — no test has driven a stubbed installing worker to installed. W-6 is the gating test; the fix (W-7) must not land before it is red."
+    minimal_repro: "render useServiceWorker with a stubbed registration whose `installing` is a worker in state installing and a non-null controller; drive it to installed; updateReady stays false"
+    reduced_to: unit
+    blast_radius:
+      - apps/web/lib/pwa/use-service-worker.ts:47-62
+    work_order_item:
+      mode: test
+      target: apps/web/lib/pwa/use-service-worker.test.ts
+      what: "gating unit test for the installing-at-mount window"
+    follow_on_fix: W-7
+
+  - observation: AC-212 / H-1 "heartbeat overwrites the only server-side backup after a failed read"
+    id: V-6
+    verdict: undecided-spec
+    confidence: high
+    basis: [AC-212]
+    adjudication: >
+      Carried forward untouched by developer decision. w03's TS-12 is GREEN against
+      unmodified source: the code does what AC-212's literal text says. The question is
+      whether AC-212 is right, which is a product call. No verdict of product bug, no fix.
+    question_for_human: "Should AC-212's 'backups resume on the next heartbeat' carve out the case where the read failed and the server copy is the user's only backup?"
+    work_order_item:
+      mode: none
+
+open_questions_for_human:
+  - "PRD Q-1 / U-3 — multi-tab worker takeover consent (V-4)"
+  - "AC-212 wording vs. backup-overwrite risk (V-6)"
+
+not_reached_this_round:
+  - "H-2, H-5, H-7 — live verdicts still could-not-reach; e2e storage-state JWTs expired (hunt-r1 live_pass)"
+  - "28 test files never executed — selection was 'related'"

@@ -22,7 +22,11 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: "1mb" }));
+/* Matches QUEUE_ITEM_MAX_BYTES in the web app's lib/offline/queue-schema.ts. A
+   lower limit here would let the client queue a save it can never send: the
+   worker would read the refusal as a transport failure and retry that document's
+   queue forever. The two caps are one decision and must move together. */
+app.use(express.json({ limit: "5mb" }));
 app.use(cookieParser());
 
 app.use(requireCsrfToken);

@@ -16,12 +16,12 @@ import { fetchOwnDraft, fetchPresence, sendHeartbeat } from "./presence";
  * resume their own draft". A backup that is written but never read back on
  * the client is not a backup.
  *
- * EXPECTED TO FAIL AS WRITTEN. `fetchOwnDraft` (this file's own export) has
- * no caller anywhere in the web app: `useYjsDoc` seeds only from the doc's
- * server `snapshot` prop, never from the draft endpoint. This test is the
- * defect report for basis U-2, not a target to weaken until green — see the
- * plan's TS-19 notes. It stays in the suite, and stays red, until the
- * restore is actually wired up (or U-2 comes back "deferred").
+ * Written as a failing defect report for basis U-2: `fetchOwnDraft` had no
+ * caller anywhere in the web app, so the backup was write-only. The restore
+ * is now wired up — `useOwnDraft` reads it, and `DraftRestoreNotice` offers
+ * it behind an explicit control rather than merging it in unasked — so the
+ * test is green on the second branch of its final assertion. Neither
+ * assertion was weakened to get there.
  */
 vi.mock("./presence", () => ({
   sendHeartbeat: vi.fn(),
@@ -62,20 +62,26 @@ it("fetches and offers the caller's own backup when local state is gone [AC-116]
     expect(screen.getByPlaceholderText).toBeTruthy();
   });
 
-  // The AC's entire point: the backup must actually be fetched. Today
-  // nothing in the render path calls this, so the assertion below fails —
-  // that failure *is* the finding.
+  // The AC's entire point: the backup must actually be fetched.
   await waitFor(() => expect(fetchOwnDraft).toHaveBeenCalledWith(doc.id));
 
   // And once fetched, its content must be reachable — either applied to the
-  // document directly or offered behind an explicit restore control. Neither
-  // exists yet, so this is a second, independent way the same gap shows up.
-  const body = screen.getByPlaceholderText(
-    /.*/,
-  ) as HTMLTextAreaElement | null;
-  const restoreControl = screen.queryByRole("button", { name: /restore/i });
-  const contentSurfaced =
-    body?.value.includes("newer content only the backup has") ??
-    false;
-  expect(contentSurfaced || restoreControl !== null).toBe(true);
+  // document directly or offered behind an explicit restore control. This app
+  // takes the second route, on purpose: nothing enters the document unasked.
+  //
+  // Inside waitFor: the call above is observable the moment the request is
+  // made, while whichever route the app takes only lands a render after it
+  // resolves. Asserting synchronously here races that render. The body field
+  // is matched by its own placeholder because a match-anything pattern also
+  // matches the title input, and an ambiguous query throws before either
+  // branch is evaluated.
+  await waitFor(() => {
+    const body = screen.queryByPlaceholderText(
+      /start writing/i,
+    ) as HTMLTextAreaElement | null;
+    const restoreControl = screen.queryByRole("button", { name: /restore/i });
+    const contentSurfaced =
+      body?.value.includes("newer content only the backup has") ?? false;
+    expect(contentSurfaced || restoreControl !== null).toBe(true);
+  });
 });

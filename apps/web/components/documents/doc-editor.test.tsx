@@ -12,8 +12,13 @@ import {
   renderDocEditor,
   setOnline,
 } from "@/components/documents/doc-editor.test-utils";
+import { DRAFT_RESTORE_LABELS } from "@/constants/labels";
 import { renameDoc, saveDoc } from "@/lib/api/documents";
+import { fetchOwnDraft, fetchPresence, sendHeartbeat } from "@/lib/api/presence";
+import { bytesToBase64 } from "@/lib/documents/base64";
+import { getDirtyDocIdsSnapshot } from "@/lib/documents/dirty-docs";
 import { readPayload, readQueue } from "@/lib/offline/save-queue";
+import * as Y from "yjs";
 
 vi.mock("@/lib/api/documents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/documents")>();
@@ -23,6 +28,22 @@ vi.mock("@/lib/api/documents", async (importOriginal) => {
     renameDoc: vi.fn(),
   };
 });
+
+// Own-draft restore (techspec 4.1) rides the same wire as presence, so all
+// three are mocked together here — TS-2/TS-3/TS-5 need to control what the
+// backup read reports without hitting the network.
+vi.mock("@/lib/api/presence", () => ({
+  sendHeartbeat: vi.fn().mockResolvedValue({ backedUpAt: null }),
+  fetchPresence: vi.fn().mockResolvedValue([]),
+  fetchOwnDraft: vi.fn(),
+}));
+
+/** Encodes `text` as a real Yjs update, the same shape `fetchOwnDraft` hands back. */
+function backupUpdate(text: string): string {
+  const ydoc = new Y.Doc();
+  ydoc.getText("body").insert(0, text);
+  return bytesToBase64(Y.encodeStateAsUpdate(ydoc));
+}
 
 function summaryFor(doc: { id: string; title: string }): DocSummary {
   return {
@@ -43,6 +64,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.mocked(saveDoc).mockReset();
   vi.mocked(renameDoc).mockReset();
+  vi.mocked(fetchOwnDraft).mockReset();
 });
 
 describe("DocEditor — save lifecycle", () => {
@@ -216,5 +238,123 @@ describe("DocEditor — Cmd/Ctrl+S shortcut", () => {
     renderDocEditor(viewerDoc);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
     expect(saveDoc).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * TS-2/TS-3 [AC-202][AC-203] — the own-draft read is "owner or editor, online"
+ * (techspec 4.1): a viewer never has a backup, and the read is online-only, so
+ * neither case should ever fetch or offer one.
+ */
+describe("DocEditor — own-draft restore gating [AC-202][AC-203]", () => {
+  it("never requests or offers a backup for a viewer", async () => {
+    const doc = makeDoc({ role: "viewer", snapshot: makeSnapshot("existing") });
+    renderDocEditor(doc);
+
+    // Wait on something that does fire for a viewer (presence) before
+    // asserting an absence, or the absence proves nothing.
+    await waitFor(() => expect(fetchPresence).toHaveBeenCalled());
+    expect(fetchOwnDraft).not.toHaveBeenCalled();
+    expect(screen.queryByText(DRAFT_RESTORE_LABELS.title)).not.toBeInTheDocument();
+  });
+
+  it("never requests or offers a backup while offline", async () => {
+    setOnline(false);
+    const doc = makeDoc({ role: "owner", snapshot: makeSnapshot("existing") });
+    renderDocEditor(doc);
+
+    // Wait on something observable offline (the offline hint) before
+    // asserting an absence, or the absence proves nothing.
+    await waitFor(() =>
+      expect(screen.getByText(EDITOR_LABELS.offlineHint)).toBeInTheDocument(),
+    );
+    expect(fetchOwnDraft).not.toHaveBeenCalled();
+    expect(screen.queryByText(DRAFT_RESTORE_LABELS.title)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * TS-5 [AC-205] — the offer is explicit-save all the way down: the backup's
+ * content must not enter the body until Restore is pressed.
+ */
+describe("DocEditor — the offer does not touch the body [AC-205]", () => {
+  it("keeps the backup's text out of the body until Restore is pressed", async () => {
+    const doc = makeDoc({ role: "owner", snapshot: makeSnapshot("stale server content") });
+    vi.mocked(fetchOwnDraft).mockResolvedValue({
+      update: backupUpdate("newer content only the backup has"),
+      backedUpAt: "2026-09-14T00:00:00.000Z",
+    });
+
+    renderDocEditor(doc);
+
+    await screen.findByText(DRAFT_RESTORE_LABELS.title);
+
+    const body = screen.getByPlaceholderText(
+      EDITOR_LABELS.bodyPlaceholder,
+    ) as HTMLTextAreaElement;
+    expect(body.value).not.toContain("newer content only the backup has");
+  });
+});
+
+/**
+ * TS-6 [AC-206] — restoring merges the backup in as ordinary local work: body,
+ * badge and the dashboard's dirty-docs record all move together.
+ */
+describe("DocEditor — restoring the backup merges it in and marks the document dirty [AC-206]", () => {
+  it("shows the backup content, closes the notice, and flips the badge and dirty-docs to unsaved", async () => {
+    const user = userEvent.setup();
+    // Already-saved (non-null, empty-body snapshot) so the transition from
+    // Saved to Draft on restore is observable, and the backup's own insert
+    // at position 0 lands into an otherwise-empty doc — no merge-order
+    // ambiguity to fight in the assertion below.
+    const doc = makeDoc({ snapshot: makeSnapshot("") });
+    vi.mocked(fetchOwnDraft).mockResolvedValue({
+      update: backupUpdate("backup only text"),
+      backedUpAt: "2026-09-14T00:00:00.000Z",
+    });
+
+    renderDocEditor(doc);
+    await screen.findByText(DRAFT_RESTORE_LABELS.title);
+    expect(screen.getByText(SYNC_STATE_LABELS.saved)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: DRAFT_RESTORE_LABELS.restore }));
+
+    expect(screen.getByPlaceholderText(EDITOR_LABELS.bodyPlaceholder)).toHaveValue(
+      "backup only text",
+    );
+    expect(screen.queryByText(DRAFT_RESTORE_LABELS.title)).not.toBeInTheDocument();
+    expect(screen.getByText(SYNC_STATE_LABELS.draft)).toBeInTheDocument();
+    expect(getDirtyDocIdsSnapshot().has(doc.id)).toBe(true);
+  });
+});
+
+/**
+ * TS-7 [AC-207] — restore never saves or notifies on its own; Save afterwards
+ * behaves like any other edit and sends the restored content.
+ */
+describe("DocEditor — a restored draft stays unsaved until Save is pressed [AC-207]", () => {
+  it("does not save on restore, then persists the restored content once Save is clicked", async () => {
+    const user = userEvent.setup();
+    const doc = makeDoc({ snapshot: makeSnapshot("") });
+    vi.mocked(fetchOwnDraft).mockResolvedValue({
+      update: backupUpdate("restored content"),
+      backedUpAt: "2026-09-14T00:00:00.000Z",
+    });
+    vi.mocked(saveDoc).mockResolvedValue(summaryFor(doc));
+
+    renderDocEditor(doc);
+    await screen.findByText(DRAFT_RESTORE_LABELS.title);
+
+    await user.click(screen.getByRole("button", { name: DRAFT_RESTORE_LABELS.restore }));
+
+    // Restore alone must never call Save or notify collaborators of a draft
+    // the user never chose to publish.
+    expect(saveDoc).not.toHaveBeenCalled();
+
+    await user.click(screen.getAllByRole("button", { name: EDITOR_LABELS.save })[0]);
+
+    await waitFor(() => expect(saveDoc).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(saveDoc).mock.calls[0];
+    expect(decodeBodyFromUpdate(doc.snapshot as string, payload)).toContain("restored content");
   });
 });

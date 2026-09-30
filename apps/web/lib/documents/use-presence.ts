@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import type { PresenceUser } from "@docsync/shared";
+import type { DraftResponse, PresenceUser } from "@docsync/shared";
 import { ApiError } from "@/lib/api/client";
-import { fetchPresence, sendHeartbeat } from "@/lib/api/presence";
+import { fetchOwnDraft, fetchPresence, sendHeartbeat } from "@/lib/api/presence";
 
 /** Mirrors the server's own constants in `config/env.ts` — keep the two in step. */
 const HEARTBEAT_INTERVAL_MS = 25_000;
@@ -31,6 +31,34 @@ export function usePresence(
     staleTime: 0,
     // Presence is decoration. A blip must not surface as an error state in the top
     // bar, and it must not retry-storm a server that is already struggling.
+    retry: false,
+  });
+}
+
+export const ownDraftQueryKey = (docId: string) =>
+  ["docs", "detail", docId, "draft"] as const;
+
+/**
+ * The caller's own draft backup, read back once when the editor opens — the half
+ * of techspec 4.1 that makes the backup a backup rather than write-only storage.
+ * It is what is left when local IndexedDB is gone: storage cleared, a different
+ * device, or a browser that evicted the origin.
+ *
+ * Read once per mount, never polled: the only writer of this row from here on is
+ * this device's own heartbeat, so a later read could only hand back what the
+ * editor already has. `staleTime: Infinity` is what holds that.
+ */
+export function useOwnDraft(
+  docId: string,
+  enabled: boolean,
+): UseQueryResult<DraftResponse["draft"]> {
+  return useQuery({
+    queryKey: ownDraftQueryKey(docId),
+    queryFn: () => fetchOwnDraft(docId),
+    enabled,
+    staleTime: Infinity,
+    // A backup that cannot be read is not worth retry-storming for; the document
+    // itself is unaffected either way.
     retry: false,
   });
 }

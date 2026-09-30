@@ -1,0 +1,177 @@
+round: r1
+slug: phase2-hardening-draft-restore
+basis: .qa/basis/phase2-hardening-draft-restore.md
+plan: .qa/plans/phase2-hardening-draft-restore.md
+mode: changed
+notes:
+  - "vitest is per-project: `pnpm exec vitest run --project web` / `--project server`. A root run with -t breaks name filtering."
+  - "Write the proof manifest as soon as each test passes, not after all of them."
+  - "proof runner must be `pnpm exec vitest run` with repo-relative paths; no `cd apps/x &&` prefix."
+  - "Avoid it.each — those come back unproven."
+  - "Assert against DRAFT_RESTORE_LABELS / SESSION_LABELS constants, never string literals."
+  - "defect_history unavailable; risk scored on 3 axes."
+  - "Round 1: hunt-r0.yml folded in. TS-10 retired (see plan, 'Cut to make room'); TS-21 added for H-4. See plan's 'Round 1 — hunt findings folded in' section for the full trace (H-1..H-5)."
+items:
+  - id: TS-1
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-201]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "Draft backup fetched exactly once per editor mount; no refetch on window focus or heartbeat tick."
+  - id: TS-2
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-202]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "Viewer triggers no fetchOwnDraft call and sees no restore notice."
+  - id: TS-3
+    mode: test
+    priority: P2
+    level: component
+    acs: [AC-203]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "Offline editor makes no draft request and shows no notice."
+  - id: TS-4
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-204, AC-214]
+    target: apps/web/components/documents/draft-restore-notice.test.tsx
+    what: "Notice renders with role=status, DRAFT_RESTORE_LABELS copy, relative time from backedUpAt, and both buttons reachable by role+name."
+  - id: TS-5
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-205]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "Backup content is absent from the body until Restore is pressed."
+  - id: TS-6
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-206]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "Restore merges into the body, closes the notice, badge reads Draft, doc marked dirty in dirty-docs."
+  - id: TS-7
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-207]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "No save request between restore and Save; pressing Save sends the restored content once."
+  - id: TS-8
+    mode: test
+    priority: P2
+    level: component
+    acs: [AC-208]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "'Not now' closes the notice leaving body, badge and save calls untouched."
+  - id: TS-9
+    mode: test
+    priority: P2
+    level: component
+    acs: [AC-209]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "A backup the document already contains produces no notice."
+  - id: TS-11
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-211]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "With fetchOwnDraft held unresolved, heartbeats carry presence but no draft payload; after it settles a heartbeat carries the backup."
+  - id: TS-12
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-212]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "A rejecting draft read: exactly one call, no notice, editor usable, backups resume on the next heartbeat. Covers hunt finding H-1 (failed-read-then-heartbeat-overwrite is AC-212's specified behaviour)."
+  - id: TS-13
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-213]
+    target: apps/web/components/documents/doc-editor.draft-restore.test.tsx
+    what: "A null backup shows no notice and does not block the next heartbeat's backup."
+  - id: TS-14
+    mode: test
+    priority: P0
+    level: unit
+    acs: [AC-215, AC-216]
+    target: apps/web/lib/documents/use-yjs-doc.test.ts
+    what: "Rerendering the hook with a newer snapshot keeps isDirty true, keeps the local edits in body, and keeps them in encodeFullState()."
+  - id: TS-15
+    mode: test
+    priority: P0
+    level: unit
+    acs: [AC-217]
+    target: apps/web/lib/documents/use-yjs-doc.test.ts
+    what: "snapshot === null yields isDirty true and one markDocDirty(docId) call with no edits."
+  - id: TS-16
+    mode: test
+    priority: P1
+    level: integration
+    acs: [AC-218]
+    target: apps/server/src/routes/save-limit.test.ts
+    what: "POST /docs/:id/save with ~4MB body is accepted; a body over 5MB returns 413. Run with --project server; Postgres already on :5432."
+  - id: TS-17
+    mode: test
+    priority: P1
+    level: e2e
+    acs: [AC-219, AC-220]
+    target: e2e/offline-queue-flush.spec.ts
+    what: "Large sub-5MB offline save queues, flushes on reconnect, queue empties, and an offline reopen shows the flushed content (ignoreVary cache drop). Chromium only."
+  - id: TS-18
+    mode: test
+    priority: P1
+    level: e2e
+    acs: [AC-221]
+    target: e2e/sw-update.spec.ts
+    what: "A worker already waiting at load activates with no banner; a second reload does not bring it back. Do NOT add the multi-tab case — blocked on U-3/Q-1."
+  - id: TS-19
+    mode: test
+    priority: P1
+    level: e2e
+    acs: [AC-222]
+    target: e2e/sw-update.spec.ts
+    what: "A worker installing while a dirty document is open shows the banner and never reloads or swaps the page on its own. Covers hunt finding H-5 (unconditional SKIP_WAITING on any waiting worker) — this is the scenario whose oracle would go red if that fires here."
+  - id: TS-20
+    mode: test
+    priority: P1
+    level: component
+    acs: [AC-224, AC-223]
+    target: apps/web/components/auth/require-session.test.tsx
+    what: "Shell chrome renders while the session is pending with the spinner confined to the content area and no account details; on an empty session router.replace is called with a login URL preserving path AND query."
+  - id: TS-21
+    mode: test
+    priority: P1
+    level: integration
+    acs: [AC-219, AC-225]
+    target: apps/server/src/routes/save-limit.test.ts
+    what: "New round 1. Queue item at exactly QUEUE_ITEM_MAX_BYTES, wrapped exactly as sw.js's flush path builds it (JSON.stringify({ update })), POSTed to the real server app — proves whether a client-accepted item is server-deliverable, or 413s (hunt finding H-4: raw update.length vs serialized-envelope size mismatch at the shared 5MB cap)."
+retired:
+  - id: TS-10
+    priority: P2
+    level: component
+    acs: [AC-210]
+    reason: "Cut in round 1 to hold the 20-scenario cap while adding TS-21. Lowest blast radius of the P2 tier (notice flicker on keystroke, self-corrects on next render); its AC-210 coverage of 'the notice is visible' overlaps TS-4. See plan's 'Cut to make room' note for the full comparison against TS-3/TS-8/TS-9, which were kept."
+blocked:
+  - unknown: U-3
+    question: "PRD Q-1 — is auto-skipWaiting on load acceptable when clients.claim() swaps every open tab, including one mid-edit? Contradicts master spec Phase 2 Part 3."
+    blocks: "adversarial multi-tab case behind AC-221/AC-222"
+  - unknown: U-1
+    question: "What should happen when draft.update is malformed base64 / an undecodable Yjs update?"
+    blocks: "error-path scenario for hasContentBeyond"
+  - unknown: U-2
+    question: "PRD Q-2 — should the restorable check wait for IndexedDB hydration?"
+    blocks: "AC-209 race scenario"
+    note: "Round 1: hunt finding H-2 confirms the race exists in code (no whenSynced gate). Does not answer the policy question, so still blocked."
+  - unknown: U-4
+    question: "What should the user see if access is revoked between the backup read and the restore?"
+    blocks: "access-revoked-during-restore scenario"
+  - unknown: U-6
+    question: "New round 1 (from hunt finding H-3). What should restoreDraft do when the live Y.Doc already has local edits made since mount — replace, merge/interleave (current code), refuse the offer, or prompt?"
+    blocks: "a scenario for 'type, then press Restore draft' — no existing scenario covers it and none can be written without this answer"

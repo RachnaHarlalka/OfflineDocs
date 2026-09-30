@@ -1,0 +1,19 @@
+{
+  "slug": "phase2-hardening-draft-restore",
+  "changed": [
+    "apps/server/src/app.ts",
+    "apps/web/app/(protected)/layout.tsx",
+    "apps/web/components/auth/require-session.tsx",
+    "apps/web/components/auth/session-pending.tsx",
+    "apps/web/components/documents/doc-editor.tsx",
+    "apps/web/components/documents/draft-restore-notice.tsx",
+    "apps/web/constants/labels.ts",
+    "apps/web/lib/api/presence.draft-restore.test.tsx",
+    "apps/web/lib/documents/use-presence.ts",
+    "apps/web/lib/documents/use-yjs-doc.ts",
+    "apps/web/lib/offline/queue-schema.ts",
+    "apps/web/lib/pwa/use-service-worker.ts",
+    "apps/web/public/sw.js"
+  ],
+  "recorded": "2026-09-21T19:37:20.912Z"
+}

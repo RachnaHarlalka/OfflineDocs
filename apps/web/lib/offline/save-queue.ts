@@ -260,9 +260,11 @@ export async function enqueueSave(input: {
   update: string;
   csrf: string | null;
 }): Promise<EnqueueResult> {
-  /* Base64 length: ~4/3 of the payload, while IndexedDB stores it as UTF-16 at
-     ~2x. An order-of-magnitude figure, not an accounting one. */
-  return enqueue("save", input.docId, input.update.length, (id) => ({
+  /* Sized by the envelope the flush actually POSTs (`JSON.stringify({ update })`,
+     see public/sw.js), not the raw base64 string — the server's express.json
+     limit counts the transmitted bytes, wrapper included. */
+  const envelopeBytes = new TextEncoder().encode(JSON.stringify({ update: input.update })).length;
+  return enqueue("save", input.docId, envelopeBytes, (id) => ({
     id,
     update: input.update,
     csrf: input.csrf,

@@ -188,6 +188,19 @@ export const PRESENCE_LABELS = {
   copied: "Copied",
 } as const;
 
+/**
+ * The offer to restore a server-side draft backup. Worded as a question the user
+ * answers, never as something that has already happened — nothing is put into the
+ * document until they press Restore.
+ */
+export const DRAFT_RESTORE_LABELS = {
+  title: "Unsaved draft found",
+  /** Followed by when it was backed up, e.g. "…from this document on 14 Sep 2026." */
+  bodyPrefix: "You have unsaved writing backed up from",
+  restore: "Restore draft",
+  dismiss: "Not now",
+} as const;
+
 export const DICTATION_LABELS = {
   open: "Dictate",
   title: "Dictation",

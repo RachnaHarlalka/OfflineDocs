@@ -32,6 +32,14 @@ export interface YjsDoc {
    *  by the service worker, which this page never hears about otherwise. Anything the
    *  server now holds stops counting as unsaved; anything typed since still does. */
   reconcileWithServer: (snapshot: string) => void;
+  /** Does `update` hold writing this device's document does not? The test for whether a
+   *  server-side draft backup (techspec 4.1) is worth offering back to its owner — a
+   *  backup this doc already contains is not a recovery, just noise. */
+  hasContentBeyond: (update: string) => boolean;
+  /** Merges a restored draft backup in as ordinary local work: it lands unsaved and dirty,
+   *  exactly as it stood on the device that backed it up. Deliberately does not touch the
+   *  synced baseline — the server has the backup, but it has never had it *as a save*. */
+  restoreDraft: (update: string) => void;
 }
 
 const HIGH_SURROGATE_START = 0xd800;
@@ -91,6 +99,14 @@ export function useYjsDoc(docId: string, snapshot: string | null): YjsDoc {
   // (empty) local content happens to match the (empty) server state — that's a
   // real distinction, not a no-op, so it starts dirty rather than "saved".
   const [isDirty, setIsDirty] = useState(() => snapshot === null);
+  // The snapshot this mount was seeded from, captured once. The Y.Doc is built
+  // once per mount (see the note above), so the setup effect below must not
+  // re-run when the query hands the same editor a newer `snapshot` — its
+  // cleanup destroys that Y.Doc, and re-running it re-baselines
+  // `lastSyncedVector` onto the doc as it stands, marking edits the server has
+  // never seen as already synced. reconcileWithServer() is what takes a newer
+  // server state, and it does the re-basing honestly.
+  const [seededSnapshot] = useState(snapshot);
   const lastSyncedVector = useRef<Uint8Array | undefined>(undefined);
   // Bumped on every local change. A save records the count it covers, so a keystroke that
   // lands while the request is in flight is still recognisably outstanding when the
@@ -107,7 +123,7 @@ export function useYjsDoc(docId: string, snapshot: string | null): YjsDoc {
     // Reflects the lazy-init decision above as a side effect (not during
     // render) so the dashboard's badge agrees with the editor's from the
     // first paint, not just after the first local edit.
-    if (snapshot === null) markDocDirty(docId);
+    if (seededSnapshot === null) markDocDirty(docId);
 
     // Fires for IndexedDB hydrating a genuine unsaved local draft, or the
     // user typing — not for the initial snapshot applied above, which ran
@@ -125,7 +141,7 @@ export function useYjsDoc(docId: string, snapshot: string | null): YjsDoc {
       persistence.destroy();
       ydoc.destroy();
     };
-  }, [docId, ydoc, snapshot]);
+  }, [docId, ydoc, seededSnapshot]);
 
   function setBody(next: string) {
     const ytext = ydoc.getText(BODY_FIELD);
@@ -223,6 +239,33 @@ export function useYjsDoc(docId: string, snapshot: string | null): YjsDoc {
     else markDocClean(docId);
   }
 
+  function hasContentBeyond(update: string): boolean {
+    // hasUpdatesBeyond only compares state vectors, which never move for a pure
+    // deletion — so a delete-only backup would score as "nothing beyond" even
+    // though its content genuinely differs. Compare content instead: merge the
+    // backup into a clone of the live doc and see whether that changes the text.
+    const currentState = Y.encodeStateAsUpdate(ydoc);
+
+    const current = new Y.Doc();
+    Y.applyUpdate(current, currentState);
+    const currentText = current.getText(BODY_FIELD).toString();
+    current.destroy();
+
+    const merged = new Y.Doc();
+    Y.applyUpdate(merged, currentState);
+    Y.applyUpdate(merged, base64ToBytes(update));
+    const mergedText = merged.getText(BODY_FIELD).toString();
+    merged.destroy();
+
+    return mergedText !== currentText;
+  }
+
+  function restoreDraft(update: string): void {
+    // The `update` listener does the rest: body, isDirty and the dashboard badge
+    // all move as they would for typing, which is what a restored draft is.
+    Y.applyUpdate(ydoc, base64ToBytes(update));
+  }
+
   return {
     body,
     setBody,
@@ -231,5 +274,7 @@ export function useYjsDoc(docId: string, snapshot: string | null): YjsDoc {
     markSaved,
     encodeFullState,
     reconcileWithServer,
+    hasContentBeyond,
+    restoreDraft,
   };
 }

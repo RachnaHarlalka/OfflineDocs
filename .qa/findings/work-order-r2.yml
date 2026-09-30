@@ -1,0 +1,189 @@
+round: r2
+run: 20260921-192748-cbfe7f8-6165
+derives_from: .qa/findings/verdicts-r1.yml
+basis: .qa/basis/phase2-hardening-draft-restore.md
+plan: .qa/plans/phase2-hardening-draft-restore.md
+status: blocked            # V-4 and V-6 are undecided-spec and need a human; everything below proceeds regardless
+proceed_anyway: true       # developer explicitly approved a fix wave on the adjudicated items
+
+ordering_rule: >
+  Fix items may only be worked after their verdict. W-5 and W-7 are gated on their own
+  gating test being written and PROVEN RED against unmodified source first (W-4, W-6).
+  Do not fix and test in the same pass for those two.
+
+items:
+
+  - id: W-0
+    mode: run
+    priority: P0
+    what: "Re-run both projects in full, not selection 'related'. 28 files never executed this round, so 85/87 is not a suite result."
+    how: "pnpm exec vitest run --project web ; pnpm exec vitest run --project server (per .claude/rules/qa-kit.md — never root vitest run with -t)"
+    why: "The two failures are both server-side; nothing establishes that the 28 unrun files are green, and the fixes in W-1/W-3 touch shared middleware and the offline queue."
+
+  - id: W-1
+    mode: fix
+    verdict: V-1
+    priority: P0
+    target: apps/server/src/middleware/error-handler.ts
+    what: "Translate a status-carrying non-AppError (body-parser's PayloadTooLargeError, status 413 / type entity.too.large) into AppError.payloadTooLarge() before the existing AppError branch."
+    fix_detail: ".qa/findings/phase2-hardening-draft-restore-implement-w05.md — 'Fix proposed, not applied', row 1. Read that row; do not re-derive."
+    gating_test: "apps/server/src/app.test.ts:78 'refuses a body over 5MB + margin with 413 [AC-218]' — already red for the right reason"
+    done_when: "that test is green and no other server test regresses"
+    watch: >
+      AppError.payloadTooLarge() already exists and is unused (lib/http-error.ts:39) — use it.
+      Keep the translation narrow: match on the 413 status / entity.too.large type, not on
+      'any error with a .status', or you start leaking internal statuses to clients.
+
+  - id: W-2
+    mode: test
+    verdict: V-2
+    priority: P0
+    target: apps/server/src/app.test.ts
+    what: >
+      Re-pin TS-21 to the invariant instead of the raw-length premise. It currently asserts
+      "a body at exactly QUEUE_ITEM_MAX_BYTES must be accepted", which bakes in the bug's own
+      framing and cannot go green under the chosen remedy. Assert instead: the largest update
+      the client's enqueue accepts is one the server accepts — i.e. size the fixture by the
+      transmitted envelope (JSON.stringify({ update })) exactly as save-queue will after W-3,
+      and assert < 300; and add the paired negative, that the first envelope size the client
+      rejects is also one the server refuses with 413.
+    why_not_a_loosening: "The re-pinned test asserts a strictly stronger property (client and server agree at the boundary) than the one it replaces."
+    depends_on: [W-1, W-3]
+
+  - id: W-3
+    mode: fix
+    verdict: V-2
+    priority: P0
+    target: apps/web/lib/offline/save-queue.ts
+    what: >
+      Size a queue item by the bytes actually transmitted, not the raw base64 string.
+      enqueueSave (:265) passes input.update.length into enqueue's cap check (:295); it must
+      pass the byte length of the envelope the flush will POST.
+    fix_detail: ".qa/findings/phase2-hardening-draft-restore-implement-w05.md — 'Fix proposed, not applied', the H-4 half of row 1."
+    remedy_is_settled: >
+      Client-side, per verdict V-2. Do NOT raise the server's express.json limit instead:
+      that moves AC-218's stated 5MB/413 boundary. Constants stay equal (AC-225).
+    watch:
+      - "Use byte length, not string length — a base64 update is ASCII so they coincide today, but the wrapper is counted by express.json in bytes."
+      - "Check every other caller of enqueue() that passes a length: the audio path shares the same budget arithmetic at :181-182 and :300-301."
+    done_when: "W-2's re-pinned test is green in both directions"
+
+  - id: W-4
+    mode: test
+    verdict: V-3
+    priority: P0
+    target: apps/web/lib/documents/use-yjs-doc.test.ts
+    what: >
+      Gating unit test for H-10: seed a Y.Doc with text, encode it as the document's snapshot;
+      clone, delete a range, encodeStateAsUpdate as the backup; assert hasContentBeyond(backup)
+      is true. Must be RED against unmodified source before W-5 is touched.
+    verified_red_by_adjudicator: "Yes — reproduced directly with yjs this round; the predicate returns false while the backup text genuinely differs."
+    acs: [AC-204, AC-209]
+    also_check: >
+      Whether the same vector-only comparison makes a delete-only local edit read as CLEAN
+      through the isDirty path at use-yjs-doc.ts:235. If so, report it as a distinct finding —
+      do not fold it into W-5 silently.
+    keep_green: "The existing TS-9 pair (AC-209, both directions) must stay green after W-5."
+
+  - id: W-5
+    mode: fix
+    verdict: V-3
+    priority: P0
+    target: apps/web/lib/documents/use-yjs-doc.ts
+    blocked_until: "W-4 exists and is proven red"
+    what: >
+      Make hasContentBeyond answer the question AC-204 asks — does the backup hold content
+      the document lacks — rather than the narrower 'has any client clock advanced'. Direction
+      from hunt-r1 H-10.suggested_fix_direction: apply the backup to a clone of the current doc
+      and compare the resulting content, or additionally diff the delete sets.
+    watch: "hasUpdatesBeyond is shared with the isDirty/outstanding path at :235. Do not change its semantics in place unless W-4's also_check says that path is broken too — otherwise add the content comparison at the hasContentBeyond level."
+
+  - id: W-6
+    mode: test
+    verdict: V-5
+    priority: P1
+    target: apps/web/lib/pwa/use-service-worker.test.ts
+    what: >
+      Gating unit test for H-12: render useServiceWorker with a stubbed registration whose
+      `installing` is a fake worker in state 'installing' and a non-null
+      navigator.serviceWorker.controller; drive it to 'installed'; assert updateReady === true.
+      Expected red on unmodified source — watchForUpdate has no registration.installing arm.
+    acs: [AC-222]
+
+  - id: W-7
+    mode: fix
+    verdict: V-5
+    priority: P1
+    target: apps/web/lib/pwa/use-service-worker.ts
+    blocked_until: "W-6 exists and is proven red"
+    what: "Factor the statechange watcher out of the updatefound handler and call it for registration.installing at mount as well."
+    watch: "Do not touch the `registration.waiting` arm at :47 — that is V-4, undecided-spec, and must not move in this wave."
+
+  - id: W-8
+    mode: infra
+    priority: P1
+    what: "Claim real e2e output paths so TS-17/18/19 can be written at all. This round's failure was the partitioner, not the code."
+    assign_paths:
+      - path: e2e/offline-queue-flush.spec.ts
+        scenarios: [TS-17]
+        acs: [AC-219, AC-220]
+      - path: e2e/sw-update.spec.ts
+        scenarios: [TS-18, TS-19]
+        acs: [AC-221, AC-222]
+    must_be_added_to: "the implementing brief's claimed stems, or hook-guard-mode denies the write again (see w04 report, 'Blocker — e2e output path rejected by the write-guard hook')"
+    do_not: "write an e2e-shaped file under a Vitest stem. Playwright testDir is ./e2e; such a file never executes and reports a false green."
+
+  - id: W-9
+    mode: test
+    priority: P1
+    depends_on: [W-8, W-10]
+    target: e2e/sw-update.spec.ts
+    what: "TS-18 (AC-221) and TS-19 (AC-222), single-tab only."
+    setup_correction: >
+      The plan's setup ('bump NEXT_PUBLIC_SW_VERSION between loads') is not workable —
+      NEXT_PUBLIC_SW_VERSION is baked in at Next build time (apps/web/next.config.ts).
+      Use the approach w04 had drafted: re-register /sw.js?v=<new-tag> from the page.
+      Same scope, different scriptURL, which is a genuine update to the SW spec and to
+      use-service-worker.ts's own registration/updatefound wiring.
+    scope_limit: "TS-19 stays single-tab. The multi-tab consent case is V-4 / PRD Q-1 and is BLOCKED — do not write it, and do not encode either answer in an assertion."
+
+  - id: W-10
+    mode: infra
+    priority: P1
+    what: "Refresh expired e2e auth. e2e/.auth/{owner,editor,viewer}.json exist but their docsync_access JWTs expired (15-minute tokens, hunt-r1 live_pass)."
+    how: "pnpm --filter server seed:e2e — reseeds the DB, so run it while no test wave is in flight. It was skipped last round only because five implementers were mid-write."
+    unblocks: [W-9, W-11]
+
+  - id: W-11
+    mode: hunt
+    priority: P2
+    depends_on: [W-10]
+    what: "Re-attempt the live verdicts that came back could-not-reach: H-2, H-5, H-7. Load e2e/.auth/owner.json into the browser context, prime a doc in IndexedDB, throttle the draft GET. H-5 additionally needs two genuinely different sw.js builds."
+
+  - id: W-12
+    mode: test
+    priority: P2
+    depends_on: [W-8]
+    target: e2e/offline-queue-flush.spec.ts
+    what: "TS-17 (AC-219, AC-220) as planned. After W-3 lands, pin step 3's body to just under the client's new envelope-aware cap so the flush path and the boundary are exercised together."
+
+blocked_on_human:
+  - id: B-1
+    from: V-4
+    question: "PRD Q-1 / basis U-3 — when a worker is waiting and another tab is dirty, does AC-221's silent takeover or AC-222's consent win?"
+    blocks: "the TS-19 multi-tab adversarial case; any fix to use-service-worker.ts:47-49"
+  - id: B-2
+    from: V-6
+    question: "Does AC-212's 'backups resume on the next heartbeat' need a carve-out when the read failed and the server copy is the user's only backup?"
+    blocks: "nothing in this wave — carried open by developer decision; TS-12 stays green as written"
+
+termination_check:
+  max_rounds_reached: false
+  budget_exceeded: false
+  work_order_empty: false
+  blocked_emitted: true
+  recommendation: >
+    Continue to r2. Two of the four stop conditions are clear and the work order is
+    substantial; the blocked flag covers only V-4/V-6, neither of which gates the five
+    actionable items. Fix wave runs W-1/W-3/W-5/W-7 with their gating tests, plus the e2e
+    infrastructure the partitioner dropped.

@@ -1,8 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import * as Y from "yjs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useYjsDoc } from "./use-yjs-doc";
 import { base64ToBytes } from "./base64";
+
+// Wraps the real dirty-docs implementation so TS-15 can observe the call
+// without changing its (localStorage-backed) behaviour for any other test
+// in this file.
+vi.mock("./dirty-docs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dirty-docs")>();
+  return { ...actual, markDocDirty: vi.fn(actual.markDocDirty) };
+});
 
 /** Matches the private BODY_FIELD constant in use-yjs-doc.ts. */
 const BODY_FIELD = "body";
@@ -110,6 +118,82 @@ describe("useYjsDoc — keystrokes during an in-flight save stay outstanding", (
     // No encodeUpdate() preceded this markSaved(), so nothing is known to
     // have reached the server — a false "Saved" would be the worst lie this
     // badge could tell.
+    expect(result.current.isDirty).toBe(true);
+  });
+});
+
+describe("useYjsDoc — hasContentBeyond decides whether a backup is worth offering [AC-209]", () => {
+  it("TS-9: is false when the backup holds only what the document already has", async () => {
+    const seed = serverSnapshot("existing content");
+    const { result } = renderHook(() => useYjsDoc("doc-ts9-same", seed));
+    await waitFor(() => expect(result.current.body).toBe("existing content"));
+
+    // The backup was produced from this exact document state, so restoring it
+    // would add nothing — offering it back would be noise, not recovery.
+    const backup = result.current.encodeFullState();
+
+    expect(result.current.hasContentBeyond(backup)).toBe(false);
+  });
+
+  it("TS-9 contrast: is true when the backup holds content the document does not", async () => {
+    const seed = serverSnapshot("existing content");
+    const { result } = renderHook(() => useYjsDoc("doc-ts9-beyond", seed));
+    await waitFor(() => expect(result.current.body).toBe("existing content"));
+
+    // A genuine backup from a device that kept typing past the seeded state.
+    const other = new Y.Doc();
+    Y.applyUpdate(other, base64ToBytes(seed));
+    other.getText(BODY_FIELD).insert("existing content".length, " plus more");
+    const backup = Buffer.from(Y.encodeStateAsUpdate(other)).toString("base64");
+
+    expect(result.current.hasContentBeyond(backup)).toBe(true);
+  });
+
+  it("H-10: is true when the backup differs from the document only by a deletion [AC-204] [AC-209]", async () => {
+    const seed = serverSnapshot("hello world");
+    const { result } = renderHook(() => useYjsDoc("doc-h10-delete-only", seed));
+    await waitFor(() => expect(result.current.body).toBe("hello world"));
+
+    // A backup from a device that typed "hello world" and then deleted "hello "
+    // before its next heartbeat — a real edit (AC-204's "content the document
+    // lacks"), even though it removes text rather than adding any. Built as a
+    // clone of the seeded state so it shares the document's own history,
+    // exactly as hunt-r1's H-10 repro does.
+    const clone = new Y.Doc();
+    Y.applyUpdate(clone, base64ToBytes(seed));
+    clone.getText(BODY_FIELD).delete(0, "hello ".length);
+    expect(clone.getText(BODY_FIELD).toString()).toBe("world");
+    const backup = Buffer.from(Y.encodeStateAsUpdate(clone)).toString("base64");
+
+    // The document still reads "hello world"; the backup's deletion is content
+    // the document does not have and would lose if the backup is discarded.
+    expect(result.current.hasContentBeyond(backup)).toBe(true);
+  });
+});
+
+describe("useYjsDoc — a delete-only local edit is not silently treated as synced (H-10 also_check)", () => {
+  it("keeps isDirty true when reconcileWithServer's snapshot does not include the local deletion", async () => {
+    const base = serverSnapshot("hello world");
+    const { result } = renderHook(() => useYjsDoc("doc-h10-reconcile-delete", base));
+    await waitFor(() => expect(result.current.body).toBe("hello world"));
+
+    // A local, offline-only edit that only removes text — no new struct is
+    // created, so no client clock advances.
+    act(() => {
+      result.current.setBody("world");
+    });
+    await waitFor(() => expect(result.current.body).toBe("world"));
+    expect(result.current.isDirty).toBe(true);
+
+    // The server has NOT actually received this deletion — `base` still reads
+    // "hello world". hasUpdatesBeyond compares state vectors only, and a
+    // delete-only edit never advances one, so the outstanding check at :236
+    // wrongly reads "nothing beyond" and marks the document clean even though
+    // its body ("world") no longer matches what the server holds.
+    act(() => {
+      result.current.reconcileWithServer(base);
+    });
+
     expect(result.current.isDirty).toBe(true);
   });
 });
@@ -263,5 +347,57 @@ describe("useYjsDoc — reconcileWithServer after a queued save is flushed", () 
     await waitFor(() => expect(result.current.body).toContain("mine"));
     expect(result.current.body).toContain("theirs");
     expect(result.current.isDirty).toBe(false);
+  });
+});
+
+describe("useYjsDoc — a newer snapshot prop does not re-baseline an already-mounted doc", () => {
+  it("keeps unsaved local edits dirty, in the body, and sendable after a newer snapshot arrives [TS-14] [AC-215] [AC-216]", async () => {
+    const docId = "doc-ts14-reseed";
+    const seedA = serverSnapshot("a");
+    const { result, rerender } = renderHook(
+      ({ snapshot }: { snapshot: string | null }) => useYjsDoc(docId, snapshot),
+      { initialProps: { snapshot: seedA } },
+    );
+    await waitFor(() => expect(result.current.body).toBe("a"));
+
+    act(() => {
+      result.current.setBody("a local edit");
+    });
+    await waitFor(() => expect(result.current.body).toBe("a local edit"));
+
+    // A refetch hands the same mounted editor a newer server snapshot — the
+    // Y.Doc must not be torn down and re-seeded from it; only
+    // reconcileWithServer() is allowed to re-base honestly (per the source
+    // comment on `seededSnapshot`).
+    const seedB = serverSnapshot("a newer server content");
+    rerender({ snapshot: seedB });
+
+    // AC-215: the edit survives and the badge-driving flag stays Draft.
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.body).toBe("a local edit");
+
+    // AC-216: pressing Save now (encodeUpdate, the real send path) must still
+    // carry the local edit — it must not have been silently re-baselined
+    // onto the doc as "already synced" and dropped from the delta.
+    const payload = result.current.encodeUpdate();
+    const base = new Y.Doc();
+    Y.applyUpdate(base, base64ToBytes(seedA));
+    Y.applyUpdate(base, base64ToBytes(payload));
+    expect(base.getText(BODY_FIELD).toString()).toBe("a local edit");
+  });
+});
+
+describe("useYjsDoc — a brand-new document is dirty from first paint", () => {
+  it("marks a null-snapshot doc dirty on mount, before any edit [TS-15] [AC-217]", async () => {
+    const { markDocDirty } = await import("./dirty-docs");
+    const spy = vi.mocked(markDocDirty);
+    spy.mockClear();
+
+    const docId = "doc-ts15-new";
+    const { result } = renderHook(() => useYjsDoc(docId, null));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(docId));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(result.current.isDirty).toBe(true);
   });
 });

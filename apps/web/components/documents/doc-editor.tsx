@@ -7,13 +7,14 @@ import { Button } from "@/components/ui/button";
 import { SyncBadge } from "@/components/documents/sync-badge";
 import { PresenceChips } from "@/components/documents/presence-chips";
 import { DocSavedNotice } from "@/components/documents/doc-saved-notice";
+import { DraftRestoreNotice } from "@/components/documents/draft-restore-notice";
 import { DictationControl } from "@/components/documents/dictation-panel";
 import { EDITOR_LABELS, PRESENCE_LABELS, QUEUE_LABELS } from "@/constants/labels";
 import { QUEUE_REFUSAL_MESSAGES } from "@/constants/errors";
 import { ApiError, csrfToken } from "@/lib/api/client";
 import { useDoc, useRenameDoc, useSaveDoc } from "@/lib/documents/use-documents";
 import { useYjsDoc } from "@/lib/documents/use-yjs-doc";
-import { useDraftBackup, usePresence } from "@/lib/documents/use-presence";
+import { useDraftBackup, useOwnDraft, usePresence } from "@/lib/documents/use-presence";
 import { useSession } from "@/lib/auth/use-session";
 import type { SyncState } from "@/lib/documents/sync-state";
 import { insertText, type TextSelection } from "@/lib/dictation/insert-text";
@@ -116,6 +117,8 @@ function DocEditorLoaded({ doc }: { doc: DocDetail }) {
     markSaved,
     encodeFullState,
     reconcileWithServer,
+    hasContentBeyond,
+    restoreDraft,
   } = useYjsDoc(
     doc.id,
     doc.snapshot,
@@ -123,6 +126,11 @@ function DocEditorLoaded({ doc }: { doc: DocDetail }) {
   const saveDoc = useSaveDoc(doc.id);
   const renameDoc = useRenameDoc();
   const { data: me } = useSession();
+
+  /* The backup this account last left on the server, read once (techspec 4.1).
+     Viewers never have one — the heartbeat refuses their updates — so they are
+     not asked for it. */
+  const ownDraft = useOwnDraft(doc.id, online && !isViewer);
 
   // Presence and the draft backup are one request on the wire (techspec 4.1/7),
   // but two hooks here: one writes on a timer, the other reads on a timer, and
@@ -132,9 +140,29 @@ function DocEditorLoaded({ doc }: { doc: DocDetail }) {
     // failed beat must not be mistaken for revoked access.
     enabled: online,
     isDirty,
-    canBackUp: !isViewer,
+    /* Not until the backup has been read back. The first heartbeat fires on
+       mount, and backing up *this* device's state before reading the old one
+       would overwrite the very draft the user is about to be offered. Presence
+       still beats meanwhile; only the update half waits. */
+    canBackUp: !isViewer && !ownDraft.isPending,
     encodeFullState,
   });
+
+  /* Evaluated once, when the backup arrives, rather than on every render: typing
+     afterwards does not make an older backup less restorable, and decoding it per
+     keystroke would be real work for no answer that changes. */
+  const hasContentBeyondRef = useRef(hasContentBeyond);
+  useEffect(() => {
+    hasContentBeyondRef.current = hasContentBeyond;
+  });
+
+  const [restorableDraft, setRestorableDraft] = useState<string | null>(null);
+  useEffect(() => {
+    const backup = ownDraft.data;
+    if (!backup) return;
+    // A backup this document already contains is not a recovery, just noise.
+    setRestorableDraft(hasContentBeyondRef.current(backup.update) ? backup.update : null);
+  }, [ownDraft.data]);
 
   const { data: present } = usePresence(doc.id, online && !accessRevoked);
 
@@ -356,6 +384,17 @@ function DocEditorLoaded({ doc }: { doc: DocDetail }) {
       <DocSavedNotice docId={doc.id} />
 
       {accessRevoked ? <AccessRevokedBanner body={body} /> : null}
+
+      {restorableDraft && ownDraft.data ? (
+        <DraftRestoreNotice
+          backedUpAt={ownDraft.data.backedUpAt}
+          onRestore={() => {
+            restoreDraft(restorableDraft);
+            setRestorableDraft(null);
+          }}
+          onDismiss={() => setRestorableDraft(null)}
+        />
+      ) : null}
 
       {!isViewer && !online ? (
         <p className="shrink-0 border-b border-warning/25 bg-warning-soft px-4 py-2 text-caption text-warning sm:px-8">

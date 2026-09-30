@@ -1,0 +1,343 @@
+change: "Offline-first draft restore, presence backup, SW update takeover, queue/body caps, auth session gating"
+scope: "uncommitted diff on main (13 files, 253+/39-) plus dependency closure: save-queue.ts, sw.js flush path, presence controller/router"
+round: 0
+pass: static
+counts:
+  confirmed: 0
+  likely: 6
+  speculative: 3
+  total: 9
+
+findings:
+  - id: H-1
+    title: "A single failed draft GET lets the next heartbeat overwrite the backup it was supposed to read first"
+    confidence: likely
+    severity: critical
+    category: data-integrity
+    where:
+      - apps/web/components/doc-editor.tsx:143
+      - apps/web/lib/documents/use-presence.ts:55-63
+      - apps/web/lib/documents/use-presence.ts:105-130
+    claim: >
+      canBackUp is gated on `!ownDraft.isPending`, which is the only thing stopping this
+      device's heartbeat from clobbering the server-side backup before the user has been
+      offered it. useOwnDraft sets `retry: false`, so one 500, one dropped connection or one
+      CSRF hiccup moves the query straight to `status: "error"`, where `isPending` is false.
+      The gate then opens and the next beat PUTs this device's state over the backup. The
+      draft the feature exists to recover is destroyed, permanently, by a transient GET
+      failure - and nothing is shown to the user, because the read error is deliberately
+      swallowed.
+    why: >
+      use-presence.ts:62 `retry: false`; doc-editor.tsx:143 `canBackUp: !isViewer && !ownDraft.isPending`.
+      React Query's `isPending` is true only for status "pending"; an errored query is
+      `isPending === false`. The heartbeat at use-presence.ts:128 fires `void beat()`
+      immediately and then every 25s, reading canBackUp from a ref, and on a dirty doc sends
+      `{ update: encode() }` which the server stores as the new backup.
+    trigger: >
+      Editor role, online, local IndexedDB empty (new device / cleared storage), a
+      server-side backup present. Make GET /docs/:id/draft fail once (500, or a network blip
+      in the first seconds after mount). Within 25s the POST heartbeat replaces the backup.
+    impact: "Silent, unrecoverable loss of the user's only off-device copy of unsaved writing."
+    found_by: static
+    evidence: "Read of use-presence.ts:55-63 and 105-130 plus doc-editor.tsx:143. Not executed."
+    suggested_test: >
+      Integration (web, MSW): mount DocEditorLoaded as editor with GET /docs/:id/draft -> 500
+      and a dirty doc; assert no POST /docs/:id/draft carries an `update` field. Same with the
+      GET pending: assert the first heartbeat body is `{}`.
+    fix_direction: "Gate on a settled-and-successful read (isSuccess), not on !isPending; treat a failed read as 'do not overwrite'."
+
+  - id: H-2
+    title: "Restore is offered/denied against a Y.Doc that may not have hydrated from IndexedDB yet, and the decision is never re-taken"
+    confidence: likely
+    severity: high
+    category: race
+    where:
+      - apps/web/components/doc-editor.tsx:146-157
+      - apps/web/lib/documents/use-yjs-doc.ts:121
+      - apps/web/lib/documents/use-yjs-doc.ts:242-248
+    claim: >
+      `hasContentBeyond` compares the backup against the live Y.Doc, but IndexeddbPersistence
+      loads asynchronously and nothing waits for `whenSynced`. If the draft GET resolves
+      before IndexedDB hydration (the common case on a warm HTTP connection with a large
+      local draft), the comparison runs against snapshot-only state. The effect's own comment
+      says the answer is "evaluated once ... typing afterwards does not make an older backup
+      less restorable" - but the state it was evaluated against was incomplete, not merely
+      older, and deps `[ownDraft.data]` mean it never re-runs.
+    why: >
+      use-yjs-doc.ts:121 constructs IndexeddbPersistence with no `whenSynced` gate; hydration
+      arrives later via the `update` listener (use-yjs-doc.ts:131-138). doc-editor.tsx:152-157
+      runs the comparison on `ownDraft.data` alone.
+    trigger: >
+      Editor with a local IndexedDB draft that already contains (or supersedes) the server
+      backup. Throttle IndexedDB / warm the network so the draft GET wins the race.
+    impact: >
+      A restore offer for writing the document already has. Accepting it merges a stale
+      full-state backup from a different clientID into the live doc - see H-3.
+    found_by: static
+    evidence: "Read of the two files; no execution. Ordering is environment-dependent, which is exactly what makes it a flaky production bug."
+    suggested_test: >
+      Integration (web): seed y-indexeddb for the doc with content, resolve the draft GET
+      before persistence syncs, assert no restore notice appears. Second case: persistence
+      syncs first, assert it appears only when the backup genuinely has content beyond.
+    fix_direction: "Await `persistence.whenSynced` before evaluating, or re-evaluate on doc update until the offer is answered."
+
+  - id: H-3
+    title: "Restore merges a full-state backup into a doc that may have its own unsaved edits, with no confirmation and no undo"
+    confidence: likely
+    severity: high
+    category: data-integrity
+    where:
+      - apps/web/lib/documents/use-yjs-doc.ts:251-256
+      - apps/web/components/doc-editor.tsx:388-397
+    claim: >
+      `restoreDraft` is an unconditional `Y.applyUpdate`. The backup carries a different
+      clientID from whatever this device has typed since mount, so a CRDT merge of two
+      independently-authored bodies produces interleaved or concatenated text rather than a
+      replacement. The notice's own docblock promises "offered, never applied" - which covers
+      consent to restore, not consent to have the current body mangled - and there is no
+      undo, no preview and no diff.
+    why: >
+      use-yjs-doc.ts:253 applies the update straight to the live ydoc; the `update` listener
+      then sets body/dirty. Nothing checks whether the local doc has divergent content, and
+      DraftRestoreNotice (draft-restore-notice.tsx) shows only a timestamp.
+    trigger: "Open the editor on a device with no local draft, type a paragraph, then press Restore draft."
+    impact: "The visible document becomes a garbled interleaving of two drafts; the user cannot get either one back."
+    found_by: static
+    evidence: "Read of use-yjs-doc.ts:251-256. Cheap to confirm with a unit test over two Y.Docs seeded from a common snapshot."
+    suggested_test: >
+      Unit (web, use-yjs-doc): seed doc A and doc B from the same snapshot, type differently in
+      each, restoreDraft(B.encodeFullState()) into A, assert the resulting body against the
+      intended product behaviour (and that it is not silently interleaved).
+    fix_direction: "Decide the product rule first - preview/diff, or refuse the offer once the local doc is dirty."
+
+  - id: H-4
+    title: "Queue item cap and the server body cap are equal, so the JSON envelope pushes a max-size save past the server limit"
+    confidence: likely
+    severity: high
+    category: boundary
+    where:
+      - apps/server/src/app.ts:25-29
+      - apps/web/lib/offline/queue-schema.ts:48-50
+      - apps/web/lib/offline/save-queue.ts:265
+      - apps/web/lib/offline/save-queue.ts:295
+      - apps/web/public/sw.js:250-256
+    claim: >
+      The diff raises express.json to "5mb" explicitly so that "a save this side accepts must
+      be one the server will take". Both caps are 5*1024*1024 = 5242880. But the client
+      measures `input.update.length` (the base64 string) while the server measures the whole
+      body, which the worker builds as `JSON.stringify({ update })` - 13 bytes of envelope on
+      top. Any update in [5242868, 5242880] is accepted by enqueue and rejected 413 by the
+      server. By the diff's own stated failure mode, the worker reads that refusal as a
+      transport failure and retries that document's queue forever.
+    why: >
+      save-queue.ts:265 passes `input.update.length`; :295 compares it to QUEUE_ITEM_MAX_BYTES.
+      sw.js:255 sends `JSON.stringify({ update: payload.update })`. `bytes` from the bytes
+      module parses "5mb" as 5242880, identical to the client constant.
+    trigger: "Queue a save whose base64 update is between 5242868 and 5242880 bytes while offline, then reconnect."
+    impact: "A permanently stuck offline queue for that document: the save never lands, the badge never clears, and the retry loop runs on every flush."
+    found_by: static
+    evidence: "Arithmetic over the cited lines. A curl of a 5242875-byte update body against the server confirms the 413 in one call."
+    suggested_test: >
+      Server integration: POST /docs/:id with a body at 5242880 and at 5242868 bytes, assert
+      the boundary. Web unit: assert enqueue rejects anything whose serialized body would
+      exceed the server cap, not just the raw update.
+    fix_direction: "Make the client cap the serialized body size, or leave headroom (e.g. server 6mb) - and assert the relationship in a test so the two constants cannot drift."
+
+  - id: H-5
+    title: "The client now activates a waiting service worker on its own, contradicting both the hook's and the worker's stated contract"
+    confidence: likely
+    severity: high
+    category: state-machine
+    where:
+      - apps/web/lib/pwa/use-service-worker.ts:38-48
+      - apps/web/lib/pwa/use-service-worker.ts:18-22
+      - apps/web/public/sw.js:83-86
+      - apps/web/public/sw.js:114-126
+      - apps/web/public/sw.js:403-409
+    claim: >
+      `watchForUpdate` now posts SKIP_WAITING to any waiting worker unconditionally. The hook's
+      own docblock two lines above still says "Never activates a waiting worker on its own -
+      that would swap the code out from under someone mid-edit", and sw.js:83 and :403-409 say
+      the banner's Refresh is "the only route to skipWaiting()". The new worker's activate
+      handler deletes every cache not in its version-keyed `keep` set and then calls
+      `clients.claim()`, while the page keeps running the *old* build and no reload is issued
+      (applyUpdate's controllerchange-then-reload path is bypassed entirely). The old build's
+      lazily-loaded chunks are now gone from STATIC_CACHE and served by a worker that does not
+      precache them.
+    why: >
+      use-service-worker.ts:45-47 posts the message; sw.js:115-126 purges non-matching caches
+      then claims clients; the reload is only wired inside applyUpdate (use-service-worker.ts:92+).
+      `watchForUpdate` runs on every mount of the hook, not only on a cold page load, so "there
+      is no work in front of it yet" is an assumption about mount timing, not a fact.
+    trigger: >
+      Deploy a new SW version while a tab is open; let it install; navigate within the app so
+      the hook re-registers, or open a second tab. The waiting worker activates under the live
+      page. Then go offline and open a route whose chunk was not yet loaded.
+    impact: "Chunk-load failure / blank content mid-edit, and the offline shell falls back to a build the page is not running."
+    found_by: static
+    evidence: "Read of the three files. Confirmable live in round 1 by bumping NEXT_PUBLIC_SW_VERSION with a tab open and watching caches.keys()."
+    suggested_test: >
+      E2E: register v1, open the editor with unsaved text, deploy v2, assert the document body
+      survives and that no cache required by the running page was deleted. Unit: assert
+      SKIP_WAITING is not posted when a controller already exists.
+    fix_direction: "Restrict the auto-take to the genuinely idle case, or pair it with the same controllerchange-then-reload applyUpdate uses."
+
+  - id: H-6
+    title: "express.json is raised to 5mb globally, ahead of auth and CSRF"
+    confidence: likely
+    severity: medium
+    category: failure-degradation
+    where:
+      - apps/server/src/app.ts:25-29
+    claim: >
+      The limit is justified by one route (the queued save) but applied by `app.use` to every
+      endpoint, and it runs before requireCsrfToken (:31) and before any auth middleware. An
+      unauthenticated caller can make the server buffer and JSON-parse 5MB per request against
+      login, refresh or any other route - a 5x increase in the cheapest available memory/CPU
+      amplification.
+    why: "app.ts:25 is a global `app.use`; the CSRF guard is mounted at :31, after it."
+    trigger: "POST 5MB of JSON to any unauthenticated route."
+    impact: "Widened DoS surface on every endpoint to buy headroom on one."
+    found_by: static
+    evidence: "Read of app.ts:22-33. Confirmable with a single curl."
+    suggested_test: "Server integration: assert a >1mb body is rejected on an auth route and accepted only on the draft/save route."
+    fix_direction: "Mount the 5mb parser on the save/draft routers only; keep the global parser at 1mb."
+
+  - id: H-7
+    title: "Only cache.delete was given ignoreVary; the doc-detail read path still matches with Vary in force"
+    confidence: speculative
+    severity: medium
+    category: failure-degradation
+    where:
+      - apps/web/public/sw.js:214-218
+      - apps/web/public/sw.js:434
+      - apps/web/public/sw.js:462
+      - apps/web/public/sw.js:451-453
+    claim: >
+      The diff establishes as fact that the API answers with `Vary: Origin` and that Vary
+      matching defeated the cached doc entry. `networkFirst` already passes `ignoreVary` and
+      `dropCachedDoc` now does too, but `staleWhileRevalidate` (:462) - the handler that serves
+      GET /docs/:id, the offline-read path this whole feature rests on - and `cacheFirst` (:434)
+      still match without it. Any request whose Origin/varied headers differ from the stored
+      one (a prefetch, a worker-initiated revalidate, a different navigation context) misses and
+      the user sees an empty document offline.
+    why: "sw.js:610 routes doc detail to staleWhileRevalidate; :462 is `cache.match(request)` with no options."
+    trigger: "Open a doc online, go offline, reload. Inspect whether the SWR hit is served."
+    impact: "Intermittent 'document unavailable' offline - the headline promise of the app."
+    found_by: static
+    evidence: "Inconsistency across four call sites in the same file; the diff's own comment supplies the mechanism. Not executed - Vary matching may in practice agree for two identical fetch-event Requests, which is why this is speculative."
+    suggested_test: "E2E offline: open doc, go offline, reload, assert the body renders from cache."
+    fix_direction: "Apply ignoreVary consistently on the DOCS_CACHE read paths, or stop the API varying on Origin for these GETs."
+
+  - id: H-8
+    title: "The draft query key is a prefix-child of the doc-detail key, so any doc invalidation resurrects a dismissed restore offer"
+    confidence: speculative
+    severity: medium
+    category: state-machine
+    where:
+      - apps/web/lib/documents/use-presence.ts:38-39
+      - apps/web/components/doc-editor.tsx:150-157
+    claim: >
+      ownDraftQueryKey is ["docs","detail",docId,"draft"]. React Query invalidation matches by
+      prefix, so any invalidateQueries({ queryKey: ["docs","detail", docId] }) - the natural
+      thing to fire after a save or a rename - also invalidates this query despite
+      staleTime: Infinity. The refetch produces a new `ownDraft.data` identity, the effect at
+      doc-editor.tsx:150 re-runs, and a notice the user dismissed comes back. Worse, by then the
+      backup is this device's own pre-save heartbeat, so the user is offered their own already-
+      saved writing back as a "recovery".
+    why: "Prefix-based invalidation plus an effect keyed on `ownDraft.data`. `staleTime` does not protect against explicit invalidation."
+    trigger: "Dismiss the notice, then save or rename the document."
+    impact: "A recurring, misleading restore offer; accepting it re-merges old content (see H-3)."
+    found_by: static
+    evidence: "Key shape read at use-presence.ts:38. Needs a grep of the mutation onSuccess handlers in use-documents.ts to confirm such an invalidation exists - not done this round."
+    suggested_test: "Integration: dismiss the notice, trigger a save, assert the notice does not return."
+    fix_direction: "Give the draft its own key root, and track 'dismissed' per docId rather than deriving it from query data."
+
+  - id: H-9
+    title: "The restore offer is an actionable dialog announced as role=status, inserted above the editor mid-typing"
+    confidence: speculative
+    severity: low
+    category: a11y
+    where:
+      - apps/web/components/documents/draft-restore-notice.tsx:27-30
+      - apps/web/constants/labels.ts:191-200
+    claim: >
+      role="status" is a polite live region for passive information, but this banner contains
+      the only control for an irreversible merge. Screen-reader users get the text announced
+      with no focus move and no indication that two buttons exist; keyboard users must tab
+      backwards out of the textarea to reach it. It is also injected into normal flow above the
+      editor after mount, shifting the content under the cursor. Labels are hardcoded English
+      and `relativeTime` output is concatenated into a sentence fragment ("backed up from X"),
+      which does not survive translation.
+    why: "draft-restore-notice.tsx:27-30 sets role=status on a container holding two Buttons; labels.ts:194 is a bodyPrefix concatenation."
+    trigger: "Open the editor with a restorable backup using a screen reader or keyboard only."
+    impact: "The recovery affordance is hard to discover and hard to reach; layout shift during typing."
+    found_by: static
+    evidence: "Read of the component. Confirmable in round 1 via the a11y tree."
+    suggested_test: "a11y: assert the notice is reachable and correctly labelled; assert no layout shift regression on the editor surface."
+    fix_direction: "Treat it as a named region or alertdialog with managed focus; make the sentence a single interpolated string."
+
+checked_and_clean:
+  - area: "Queue schema / IndexedDB migration"
+    checked: "QUEUE_DB_VERSION still 1 in both queue-schema.ts:4 and sw.js:159; the diff changes only a comment on QUEUE_ITEM_MAX_BYTES. No store shape change, so no migration path to break on an existing DB."
+    result: clean
+  - area: "Private draft leaking into the SW cache"
+    checked: "isDocDetail (sw.js:585) is /^\\/docs\\/[^/]+$/, so GET /docs/:id/draft falls through to the network uncached; isAuthRoute bails earlier; non-GET is never handled."
+    result: "clean - no cross-user cache exposure via the new draft GET"
+  - area: "Server authorisation on the new draft read"
+    checked: "draftRouter GET '/' carries requireAuth + requireRole('viewer') (routes/presence.ts); the controller returns `own` only, and the POST path rejects viewer updates with 403 (controllers/presence.ts:36). Horizontal access is bounded by requireRole's 404/403 split."
+    result: clean
+  - area: "Auth session gating / layout reorder"
+    checked: "RequireSession moved inside AppShell; the shell renders no session-derived content, min-h-svh correctly swapped for min-h-full in all three states, SessionPending className merge via cn is additive with the base class last-wins risk noted but min-h-full follows min-h-svh in the class string."
+    result: "clean - cosmetic only; worth a visual check in round 1"
+  - area: "setBody surrogate-pair handling"
+    checked: "use-yjs-doc.ts:160-178 widens both diff boundaries off surrogate pairs before transacting. Unchanged by this diff and correct for the emoji case."
+    result: clean
+  - area: "markSaved / encodeUpdate in-flight bookkeeping"
+    checked: "sentSave captures vector+editCount at encode time (use-yjs-doc.ts:184-190) and markSaved commits that, not the current state - keystrokes during a save stay dirty. The new seededSnapshot change correctly stops the setup effect re-baselining on a newer snapshot."
+    result: "clean - the seededSnapshot fix is sound"
+  - area: "Concurrency between two tabs on the same document"
+    checked: "y-indexeddb gives both tabs the same persisted doc; the heartbeat is per-mount and both would write backups, but the write is last-wins full state of an identical doc."
+    result: "no finding beyond H-1"
+
+not_investigated:
+  - "Live pass: no browser this round, per instruction. H-5 (SW takeover), H-7 (Vary/offline read) and H-2 (hydration race) are all timing-dependent and should be driven in round 1 against http://localhost:4000."
+  - "H-8 needs a read of the mutation onSuccess invalidation keys in apps/web/lib/documents/use-documents.ts, which I did not open."
+  - "The SW flush error handling around sw.js:250-270 was not read in full, so H-4's 'retries forever' consequence rests on the diff author's own stated assertion in app.ts:25-29 rather than on my reading."
+  - "presence.draft-restore.test.tsx was deliberately not read as evidence, to avoid anchoring on what the implementer already covered."
+
+# ---------------------------------------------------------------------------
+# Index, in the report shape the toolchain reads. Details are in `findings:` above.
+report_markdown: |
+  # Adversarial review: offline draft restore / SW takeover / queue caps
+
+  - **Scope:** uncommitted diff on main, 13 files, plus dependency closure
+  - **Confirmed:** 0 · **Likely:** 6 · **Speculative:** 3
+
+  ## Findings
+
+  ### H-1 — A failed draft GET lets the next heartbeat overwrite the backup it should have read first  `likely` `sev:critical`
+  ### H-2 — Restore is decided against a Y.Doc that may not have hydrated from IndexedDB yet  `likely` `sev:high`
+  ### H-3 — Restore merges a full-state backup into a dirty doc, interleaving both bodies, no undo  `likely` `sev:high`
+  ### H-4 — Queue item cap equals the server body cap, so the JSON envelope 413s a max-size save  `likely` `sev:high`
+  ### H-5 — The client now auto-activates a waiting service worker, against both stated contracts  `likely` `sev:high`
+  ### H-6 — express.json raised to 5mb globally, ahead of auth and CSRF  `likely` `sev:medium`
+  ### H-7 — Only cache.delete got ignoreVary; the doc-detail offline read path did not  `speculative` `sev:medium`
+  ### H-8 — The draft query key is a prefix-child of the doc key, so invalidation resurrects a dismissed offer  `speculative` `sev:medium`
+  ### H-9 — An actionable irreversible-merge offer announced as role=status, hardcoded English  `speculative` `sev:low`
+
+  ## Checked and clean
+
+  | Area | What I checked | Result |
+  |---|---|---|
+  | Queue schema migration | QUEUE_DB_VERSION still 1 both sides; comment-only change | clean |
+  | Draft leaking into SW cache | isDocDetail regex excludes /draft; falls through to network | clean |
+  | Server authz on the new draft read | requireAuth + requireRole('viewer'), returns `own` only, 404/403 split | clean |
+  | Auth session gating / layout reorder | min-h-svh -> min-h-full in all three states; shell renders nothing session-derived | clean |
+  | setBody surrogate-pair handling | both diff boundaries widened off pairs before transact | clean |
+  | markSaved / encodeUpdate in-flight bookkeeping | sentSave captures vector+editCount at encode time; seededSnapshot fix is sound | clean |
+  | Two tabs on one document | shared y-indexeddb doc; backup write is last-wins over identical state | no finding beyond H-1 |
+
+  ## Could not investigate
+
+  See `not_investigated:` above — live pass deferred to round 1 per instruction.

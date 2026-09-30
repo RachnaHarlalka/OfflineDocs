@@ -211,7 +211,11 @@ function deleteEntry(db, id) {
 async function dropCachedDoc(docId) {
   try {
     const cache = await caches.open(DOCS_CACHE);
-    await cache.delete(`${API_ORIGIN}/docs/${docId}`);
+    /* ignoreVary: the API answers every request with `Vary: Origin` (the CORS
+       middleware adds it), and a delete keyed by URL alone builds a Request with
+       no Origin header — so without this the stored entry never matches and the
+       stale copy survives the flush it was meant to invalidate. */
+    await cache.delete(`${API_ORIGIN}/docs/${docId}`, { ignoreVary: true });
   } catch (error) {
     console.warn("[sw] could not drop cached doc", docId, error);
   }

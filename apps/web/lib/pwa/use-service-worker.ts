@@ -35,13 +35,21 @@ export function useServiceWorker(): ServiceWorkerState {
     navigator.serviceWorker.startMessages();
 
     function watchForUpdate(registration: ServiceWorkerRegistration) {
-      // Already populated when the update installed before this mount.
-      if (registration.waiting && navigator.serviceWorker.controller) setUpdateReady(true);
+      /* A worker already waiting when this page loaded is one there is no work in
+         front of yet — nothing typed, nothing mid-save. Take it now instead of
+         asking again.
 
-      registration.addEventListener("updatefound", () => {
-        const { installing } = registration;
-        if (!installing) return;
+         A plain browser reload does not replace the controlling worker: the new
+         document is still controlled by the old one, so the waiting worker stays
+         waiting and, without this, the banner came back on every refresh. That
+         reads as a bug, and it teaches people that Refresh does nothing. The
+         banner is for the update that arrives *while* someone is working, which
+         is the case below — that one is still theirs to accept. */
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: "SKIP_WAITING" });
+      }
 
+      function watchInstalling(installing: ServiceWorker) {
         installing.addEventListener("statechange", () => {
           /* No controller means a first install rather than an update — there is
              no running version to refresh out of. */
@@ -49,6 +57,19 @@ export function useServiceWorker(): ServiceWorkerState {
             setUpdateReady(true);
           }
         });
+      }
+
+      // A worker already mid-install when register() resolved has already fired
+      // its own `updatefound` — nothing below would ever hear it reach
+      // "installed" without this, so the banner never appears for it.
+      if (registration.installing) {
+        watchInstalling(registration.installing);
+      }
+
+      registration.addEventListener("updatefound", () => {
+        const { installing } = registration;
+        if (!installing) return;
+        watchInstalling(installing);
       });
     }
 

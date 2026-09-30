@@ -1,0 +1,10 @@
+{"ts":"2026-09-21T19:27:48.240Z","agent":"orchestrator","event":"run.started","inputs":"Uncommitted staged changes on main: offline draft restore, presence, service worker, queue schema, auth session-pending/require-session, doc editor","base":"origin/main","head":"cbfe7f8","branch":"main","mode":"changed"}
+{"ts":"2026-09-21T19:27:48.378Z","agent":"orchestrator","event":"stage.entered","stage":"plan"}
+{"ts":"2026-09-21T19:46:12.843Z","agent":"orchestrator","event":"stage.entered","stage":"implement"}
+{"ts":"2026-09-21T19:54:49.859Z","agent":"orchestrator","event":"stage.entered","stage":"run"}
+{"ts":"2026-09-21T19:56:27.452Z","agent":"human","event":"decision.made","question":"AC-212: after a failed draft read, the next heartbeat overwrites the user's only server-side backup (hunt H-1, critical). Two agents concluded this is what AC-212 specifies, not a code defect. Does AC-212 need a carve-out for failed reads?","answer":"LEFT OPEN by the developer. Carried to the report's 'Needs your decision' section with evidence from hunt-r0 (H-1) and w03's TS-12 GREEN verdict. Not to be treated as settled by a later run.","by":"developer"}
+{"ts":"2026-09-21T19:56:27.473Z","agent":"orchestrator","event":"stage.entered","stage":"triage"}
+{"ts":"2026-09-21T20:01:17.570Z","agent":"orchestrator","event":"cost.recorded","tokens":2889559,"raw":21379030,"fresh":835173,"input":652,"output":59574,"cache-write":774947,"cache-read":20543857,"messages":326,"transcripts":10,"window":"2026-09-21T19:27:48/2026-09-21T19:56:27","source":"transcripts"}
+{"ts":"2026-09-21T20:07:20.874Z","agent":"orchestrator","event":"stage.entered","stage":"fix"}
+{"ts":"2026-09-21T20:10:51.395Z","agent":"orchestrator","event":"run.finished","verdict":"not-ready","minutes":"47","agents-run":"10"}
+{"ts":"2026-09-21T20:10:52.224Z","agent":"orchestrator","event":"cost.recorded","tokens":3566897,"raw":26078023,"fresh":1065661,"input":792,"output":71665,"cache-write":993204,"cache-read":25012362,"messages":396,"transcripts":13,"window":"2026-09-21T19:27:48/2026-09-21T20:10:51","source":"transcripts"}
