@@ -22,6 +22,8 @@ const replace = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   usePathname: () => "/doc/abc",
+  // PrimaryNav in AppSidenav reads the dashboard view from the query string.
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 const session = vi.mocked(useSession);
@@ -32,7 +34,7 @@ function renderProtectedLayout() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProtectedLayout>
+      <ProtectedLayout params={Promise.resolve({})}>
         <div>secret protected content</div>
       </ProtectedLayout>
     </QueryClientProvider>,
